@@ -31,6 +31,8 @@ export interface FileItem {
   readonly sequenceFrames?: readonly File[];
   /** Phase 5: cached frame count for UI; === sequenceFrames.length. */
   readonly sequenceFrameCount?: number;
+  /** Phase 6: if true, chroma-key the first frame's (0,0) pixel during composition. */
+  readonly sequenceChromaKey?: boolean;
 }
 
 export interface QueueState {
@@ -40,7 +42,7 @@ export interface QueueState {
 
 export type QueueAction =
   | { type: 'ADD_FILES'; files: readonly File[] }
-  | { type: 'ADD_SEQUENCE'; files: readonly File[] }
+  | { type: 'ADD_SEQUENCE'; files: readonly File[]; chromaKey: boolean }
   | { type: 'START_CONVERT'; id: string }
   | { type: 'PROGRESS'; id: string; progress: number }
   | { type: 'SET_VIDEO_META'; id: string; meta: VideoMeta }
@@ -140,6 +142,7 @@ const reducer: Reducer<QueueState, QueueAction> = (state, action) => {
         thumbnailUrl: URL.createObjectURL(first),
         sequenceFrames: sorted,
         sequenceFrameCount: sorted.length,
+        sequenceChromaKey: action.chromaKey,
       };
       return {
         ...state,
@@ -272,6 +275,9 @@ const reducer: Reducer<QueueState, QueueAction> = (state, action) => {
           status: 'pending',
           ...(old.thumbnailUrl !== undefined ? { thumbnailUrl: old.thumbnailUrl } : {}),
           ...(old.videoMeta !== undefined ? { videoMeta: old.videoMeta } : {}),
+          ...(old.sequenceChromaKey !== undefined
+            ? { sequenceChromaKey: old.sequenceChromaKey }
+            : {}),
         };
         items[id] = next;
       }

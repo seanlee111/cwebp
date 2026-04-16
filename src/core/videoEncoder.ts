@@ -21,6 +21,21 @@ export interface VideoEncodeOptions {
   loopCount: number;
 }
 
+/** Phase 6: sequence composition can chroma-key the first frame's (0,0) pixel. */
+export interface SequenceEncodeOptions extends VideoEncodeOptions {
+  /** If true, pixels matching the first-frame (0,0) RGB within tolerance become alpha=0. */
+  chromaKey?: boolean;
+}
+
+interface RGB {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+}
+
+/** ±10 per channel (Chebyshev) tolerates minor JPEG compression artifacts. */
+const CHROMA_TOLERANCE = 10;
+
 export interface VideoMetadata {
   duration: number;
   width: number;
@@ -172,16 +187,75 @@ export async function captureFirstFrame(file: File): Promise<string> {
   });
 }
 
+/** Phase 6: per-pixel chroma-key. Uses Chebyshev max-channel distance. */
+function applyChromaKey(data: Uint8ClampedArray, key: RGB, tol: number): void {
+  const { r, g, b } = key;
+  for (let i = 0; i < data.length; i += 4) {
+    const r0 = data[i];
+    const g0 = data[i + 1];
+    const b0 = data[i + 2];
+    if (r0 === undefined || g0 === undefined || b0 === undefined) continue;
+    if (
+      Math.abs(r0 - r) <= tol &&
+      Math.abs(g0 - g) <= tol &&
+      Math.abs(b0 - b) <= tol
+    ) {
+      data[i + 3] = 0;
+    }
+  }
+}
+
+/**
+ * Phase 6: read a single RGB pixel at (0,0) of a File via OffscreenCanvas
+ * (DOM canvas fallback). Used as the chroma-key color for sequence composition.
+ */
+async function extractKeyColor(file: File): Promise<RGB> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const w = bitmap.width;
+    const h = bitmap.height;
+    let ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
+    if (typeof OffscreenCanvas !== 'undefined') {
+      const c = new OffscreenCanvas(w, h);
+      ctx = c.getContext('2d', { alpha: true });
+      if (!ctx) throw new ConversionError('OffscreenCanvas 2D 不可用');
+      ctx.drawImage(bitmap, 0, 0);
+    } else if (typeof document !== 'undefined') {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      ctx = c.getContext('2d', { alpha: true });
+      if (!ctx) throw new ConversionError('Canvas 2D 不可用');
+      ctx.drawImage(bitmap, 0, 0);
+    } else {
+      throw new ConversionError('当前环境缺少 Canvas');
+    }
+    const pixel = ctx.getImageData(0, 0, 1, 1).data;
+    return {
+      r: pixel[0] ?? 0,
+      g: pixel[1] ?? 0,
+      b: pixel[2] ?? 0,
+    };
+  } finally {
+    bitmap.close();
+  }
+}
+
 /**
  * Phase 5: preprocess one input frame (PNG / JPEG) into a PNG Uint8Array of
  * the target size. OffscreenCanvas on browsers that support it, DOM canvas
  * fallback otherwise. `clearRect` before draw guarantees a transparent base
  * so ffmpeg's `-pix_fmt yuva420p` has a clean alpha channel to preserve.
+ *
+ * Phase 6: if `chromaKey` is provided, the drawn pixels are scanned and any
+ * RGB within CHROMA_TOLERANCE of the key color have their alpha set to 0
+ * before the canvas is encoded to PNG.
  */
 async function preprocessFrameToPng(
   file: File,
   width: number,
   height: number,
+  chromaKey: RGB | null,
 ): Promise<Uint8Array> {
   const bitmap = await createImageBitmap(file);
   const useOffscreen = typeof OffscreenCanvas !== 'undefined';
@@ -194,6 +268,11 @@ async function preprocessFrameToPng(
       if (!ctx) throw new ConversionError('OffscreenCanvas 2D 不可用');
       ctx.clearRect(0, 0, width, height);
       ctx.drawImage(bitmap, 0, 0, width, height);
+      if (chromaKey) {
+        const img = ctx.getImageData(0, 0, width, height);
+        applyChromaKey(img.data, chromaKey, CHROMA_TOLERANCE);
+        ctx.putImageData(img, 0, 0);
+      }
       blob = await canvas.convertToBlob({ type: 'image/png' });
     } else if (typeof document !== 'undefined') {
       const canvas = document.createElement('canvas');
@@ -203,6 +282,11 @@ async function preprocessFrameToPng(
       if (!ctx) throw new ConversionError('Canvas 2D 不可用');
       ctx.clearRect(0, 0, width, height);
       ctx.drawImage(bitmap, 0, 0, width, height);
+      if (chromaKey) {
+        const img = ctx.getImageData(0, 0, width, height);
+        applyChromaKey(img.data, chromaKey, CHROMA_TOLERANCE);
+        ctx.putImageData(img, 0, 0);
+      }
       blob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob(
           (b) =>
@@ -237,7 +321,7 @@ async function preprocessFrameToPng(
  */
 export async function encodeSequenceToWebP(
   files: readonly File[],
-  opts: VideoEncodeOptions,
+  opts: SequenceEncodeOptions,
   onProgress: (p: number) => void,
 ): Promise<Blob> {
   if (files.length < 2) {
@@ -261,6 +345,16 @@ export async function encodeSequenceToWebP(
     throw new ConversionError('第一帧尺寸无效');
   }
 
+  // Phase 6: probe the chroma-key color from the first frame if enabled.
+  let keyColor: RGB | null = null;
+  if (opts.chromaKey === true) {
+    try {
+      keyColor = await extractKeyColor(first);
+    } catch (cause) {
+      throw new ConversionError('无法读取第一帧左上角颜色用于抠色', cause);
+    }
+  }
+
   const ff = await loadFfmpeg();
   const { fetchFile: _fetchFile } = await import('@ffmpeg/util');
   void _fetchFile; // keep the import side-effect consistent with video path
@@ -281,7 +375,7 @@ export async function encodeSequenceToWebP(
       if (!file) continue;
       let pngBytes: Uint8Array;
       try {
-        pngBytes = await preprocessFrameToPng(file, width, height);
+        pngBytes = await preprocessFrameToPng(file, width, height, keyColor);
       } catch (cause) {
         throw new ConversionError(
           `第 ${i + 1} 帧（${file.name}）预处理失败`,

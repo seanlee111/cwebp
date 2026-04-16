@@ -8,7 +8,10 @@ import {
   type VideoFps,
   type VideoLoopCount,
 } from './components/QualityControl';
-import { SequenceActions } from './components/SequenceActions';
+import {
+  SequenceActions,
+  type SequenceComposeOptions,
+} from './components/SequenceActions';
 import {
   ConversionError,
   captureVideoThumbnail,
@@ -209,6 +212,7 @@ export function App() {
       // Sequence composition pipeline
       inFlight.current.add(nextId);
       dispatch({ type: 'START_CONVERT', id: nextId });
+      const chromaKey = item.sequenceChromaKey === true;
       void (async () => {
         try {
           const frames = item.sequenceFrames ?? [];
@@ -221,6 +225,7 @@ export function App() {
               fps: optsRef.current.fps,
               quality: optsRef.current.quality,
               loopCount: optsRef.current.loopCount,
+              chromaKey,
             },
             (p) => dispatch({ type: 'PROGRESS', id: nextId, progress: p }),
           );
@@ -272,8 +277,8 @@ export function App() {
   }, [state.items, state.order, dispatch, wasmState]);
 
   const handleComposeSequence = useCallback(
-    (files: File[]) => {
-      dispatch({ type: 'ADD_SEQUENCE', files });
+    (files: File[], opts: SequenceComposeOptions) => {
+      dispatch({ type: 'ADD_SEQUENCE', files, chromaKey: opts.chromaKey });
     },
     [dispatch],
   );

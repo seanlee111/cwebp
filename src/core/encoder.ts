@@ -92,6 +92,7 @@ export async function supportsWebPEncoding(): Promise<boolean> {
 
 import type {
   FfmpegLoadState,
+  SequenceEncodeOptions,
   VideoEncodeOptions,
   VideoMetadata,
 } from './videoEncoder';
@@ -117,7 +118,7 @@ export async function encodeVideo(
 /** Phase 5: compose an ordered array of static frames into one animated WebP. */
 export async function encodeSequence(
   files: readonly File[],
-  opts: VideoEncodeOptions,
+  opts: SequenceEncodeOptions,
   onProgress: (p: number) => void,
 ): Promise<Blob> {
   const mod = await loadVideoModule();
@@ -146,5 +147,5 @@ export async function subscribeVideoState(
   return mod.subscribeFfmpegState(fn);
 }
 
-export type { FfmpegLoadState, VideoEncodeOptions, VideoMetadata };
+export type { FfmpegLoadState, SequenceEncodeOptions, VideoEncodeOptions, VideoMetadata };
 export type { WasmLoadState } from './wasmEncoder';
