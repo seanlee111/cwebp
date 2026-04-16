@@ -81,7 +81,8 @@ cwebp/
 | **003-animated-video** | [spec](specs/003-animated-video/spec.md) · [plan](specs/003-animated-video/plan.md) · [tasks](specs/003-animated-video/tasks.md) | ✅ 实现完成（首屏 90.87 KB gzip，ffmpeg core 独立 chunk） |
 | **004-bigger-and-worker** | [spec](specs/004-bigger-and-worker/spec.md) · [plan](specs/004-bigger-and-worker/plan.md) · [tasks](specs/004-bigger-and-worker/tasks.md) | ✅ 实现完成（图 200 MB / 视频 500 MB / 时长 30s；静态图 Worker 化；首屏 92 KB gzip） |
 | **005-image-sequence** | [spec](specs/005-image-sequence/spec.md) · [plan](specs/005-image-sequence/plan.md) · [tasks](specs/005-image-sequence/tasks.md) | ✅ 实现完成（序列 PNG/JPEG → 透明 animated WebP；首屏 93 KB gzip） |
-| 006+ | 多文件并发 / 视频 trim / Tauri 桌面版 / AVIF | ⏳ 未规划 |
+| **006-chroma-key** | [spec](specs/006-chroma-key/spec.md) · [plan](specs/006-chroma-key/plan.md) · [tasks](specs/006-chroma-key/tasks.md) | 📝 spec 已写，实现中（序列合成按左上角像素 chroma-key 抠色） |
+| 007+ | 多文件并发 / 视频 trim / Tauri 桌面版 / AVIF | ⏳ 未规划 |
 
 ### MVP 实现 commit 轨迹（001）
 
