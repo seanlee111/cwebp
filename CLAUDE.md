@@ -79,7 +79,8 @@ cwebp/
 | **001-mvp** | [constitution](specs/001-mvp/constitution.md) · [spec](specs/001-mvp/spec.md) · [plan](specs/001-mvp/plan.md) · [tasks](specs/001-mvp/tasks.md) | ✅ 交付 + 浏览器验收通过 |
 | **002-lossless-wasm** | [spec](specs/002-lossless-wasm/spec.md) · [plan](specs/002-lossless-wasm/plan.md) · [tasks](specs/002-lossless-wasm/tasks.md) | ✅ 实现完成（首屏 hard gate 通过） |
 | **003-animated-video** | [spec](specs/003-animated-video/spec.md) · [plan](specs/003-animated-video/plan.md) · [tasks](specs/003-animated-video/tasks.md) | ✅ 实现完成（首屏 90.87 KB gzip，ffmpeg core 独立 chunk） |
-| 004+ | Web Worker pool / Tauri 桌面版 / AVIF / trim 等视频 UX 增强 | ⏳ 未规划 |
+| **004-bigger-and-worker** | [spec](specs/004-bigger-and-worker/spec.md) · [plan](specs/004-bigger-and-worker/plan.md) · [tasks](specs/004-bigger-and-worker/tasks.md) | 📝 spec 已写，实现中（放宽上限 + 静态图 Web Worker） |
+| 005+ | 多文件并发 / 视频 trim / Tauri 桌面版 / AVIF | ⏳ 未规划 |
 
 ### MVP 实现 commit 轨迹（001）
 
