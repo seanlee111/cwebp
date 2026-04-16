@@ -1,14 +1,43 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { BulkActions } from './components/BulkActions';
 import { DropZone } from './components/DropZone';
 import { FileQueue } from './components/FileQueue';
+import { QualityControl } from './components/QualityControl';
 import { ConversionError, convertToWebP } from './core/converter';
-import { useQueue } from './core/queue';
+import { useQueue, type FileItem } from './core/queue';
+import { useLocalStorage } from './hooks/useLocalStorage';
+
+const RECODE_DEBOUNCE_MS = 300;
 
 export function App() {
   const [state, dispatch] = useQueue();
 
-  // Track ids already picked up by a processor, so React 18 StrictMode's
-  // double-invoked effect doesn't start two conversions for the same file.
+  // Persisted user settings
+  const [quality, setQuality] = useLocalStorage<number>('cwebp.quality', 80);
+  const [lossless, setLossless] = useLocalStorage<boolean>(
+    'cwebp.lossless',
+    false,
+  );
+
+  // The processor effect reads latest opts from a ref so quality changes
+  // don't reshape its dependency array (avoids extra effect invocations).
+  const optsRef = useRef({ quality, lossless });
+  optsRef.current = { quality, lossless };
+
+  // Debounced RECODE_ALL — waits until the user pauses dragging the slider.
+  const firstSettingsRender = useRef(true);
+  useEffect(() => {
+    if (firstSettingsRender.current) {
+      firstSettingsRender.current = false;
+      return;
+    }
+    const t = setTimeout(() => {
+      dispatch({ type: 'RECODE_ALL' });
+    }, RECODE_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [quality, lossless, dispatch]);
+
+  // Guard against React 18 StrictMode double-invoke
   const inFlight = useRef<Set<string>>(new Set());
 
   const handleFiles = useCallback(
@@ -18,8 +47,7 @@ export function App() {
     [dispatch],
   );
 
-  // Serial processor: at most one conversion at a time.
-  // When DONE/FAIL mutates state, this effect re-runs and picks the next pending.
+  // Serial processor: one conversion at a time
   useEffect(() => {
     const hasConverting = state.order.some(
       (id) => state.items[id]?.status === 'converting',
@@ -40,10 +68,7 @@ export function App() {
 
     void (async () => {
       try {
-        const blob = await convertToWebP(item.file, {
-          quality: 80,
-          lossless: false,
-        });
+        const blob = await convertToWebP(item.file, { ...optsRef.current });
         dispatch({ type: 'DONE', id: nextId, blob });
       } catch (e) {
         const msg =
@@ -54,6 +79,16 @@ export function App() {
       }
     })();
   }, [state.items, state.order, dispatch]);
+
+  // Flatten items for bulk actions (keep order)
+  const items = useMemo<FileItem[]>(() => {
+    const out: FileItem[] = [];
+    for (const id of state.order) {
+      const it = state.items[id];
+      if (it) out.push(it);
+    }
+    return out;
+  }, [state.items, state.order]);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -68,9 +103,16 @@ export function App() {
         </div>
       </header>
 
-      <main className="mx-auto flex max-w-5xl flex-col gap-6 px-6 py-10">
+      <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10">
         <DropZone onFiles={handleFiles} />
+        <QualityControl
+          quality={quality}
+          lossless={lossless}
+          onQualityChange={setQuality}
+          onLosslessChange={setLossless}
+        />
         <FileQueue state={state} dispatch={dispatch} />
+        <BulkActions items={items} />
       </main>
     </div>
   );
