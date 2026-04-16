@@ -27,8 +27,11 @@ npm run build
 
 - 拖放 / 多选 PNG、JPEG 文件
 - 批量串行转换，单文件失败不阻塞其他文件
-- 质量滑块 0–100（默认 80，持久化到 localStorage）
-- 近无损模式（Canvas `quality=1`；真正 lossless 待 Phase 2 WASM）
+- **双编码模式**：
+  - **真无损（WASM，默认）** — `@jsquash/webp` + libwebp `-lossless`，像素级保真（含透明通道）
+  - **高速（Canvas）** — 浏览器原生 `toBlob`，lossy，质量 0–100 可调
+- WASM 走动态 import + `requestIdleCallback` 后台预热，不占首屏预算
+- WASM 加载失败时 UI 有明确降级按钮（"改用 Canvas" / "重试"）
 - 原始 → 输出体积对比与节省百分比
 - 单文件下载 / 全部打包 ZIP
 - 键盘可达；响应式到移动端
@@ -57,8 +60,9 @@ npm run build
 - **Tailwind CSS 4** via `@tailwindcss/vite`
 - **JSZip** — ZIP 打包（STORE 模式，WebP 已压缩，跳过 deflate 省 CPU）
 - **lucide-react** — 图标
+- **@jsquash/webp** (Squoosh 团队) — WASM 版 libwebp，动态 import 拆独立 chunk
 
-生产构建总体积 ≈ **82 KB gzip**（HTML + CSS + JS 一次性加载）。
+生产构建首屏 **88.65 KB gzip**（HTML + CSS + JS 一次性加载）。WASM 编码器 chunk（enc ~115 KB + enc_simd ~128 KB + dec ~49 KB + 入口 ~16 KB，gzip 后）仅在进入 WASM 模式时加载。
 
 ## 目录结构
 
@@ -82,9 +86,12 @@ cwebp/
     │   ├── QualityControl.tsx   质量滑块 + 近无损
     │   └── BulkActions.tsx      全部下载 ZIP
     ├── core/
-    │   ├── converter.ts         File → WebP Blob（Canvas 核心）
-    │   ├── queue.ts             useReducer 状态机
-    │   └── zip.ts               JSZip 封装
+    │   ├── encoder.ts            策略分发（canvas / wasm）+ 公共导出
+    │   ├── canvasEncoder.ts      Canvas toBlob 路径（lossy）
+    │   ├── wasmEncoder.ts        @jsquash/webp 路径（lossless）+ 懒加载
+    │   ├── errors.ts             共享 ConversionError
+    │   ├── queue.ts              useReducer 状态机
+    │   └── zip.ts                JSZip 封装
     ├── hooks/
     │   └── useLocalStorage.ts   持久化设置
     └── utils/
@@ -111,9 +118,7 @@ cwebp/
 
 ## Roadmap
 
-MVP 之后的阶段已在 [plan.md §9](./specs/001-mvp/plan.md) 规划：
-
-- Phase 2: `@jsquash/webp` 真正的 lossless WebP
-- Phase 3: Web Worker 并行编码
-- Phase 4: Tauri 桌面版（可输出到原目录）
-- Phase 5: AVIF 输出支持（可选）
+- ✅ Phase 2: `@jsquash/webp` 真正的 lossless WebP
+- ⏳ Phase 3: Web Worker 并行编码
+- ⏳ Phase 4: Tauri 桌面版（可输出到原目录）
+- ⏳ Phase 5: AVIF 输出支持（可选）

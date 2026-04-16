@@ -77,7 +77,7 @@ cwebp/
 | Iteration | 产出 | 状态 |
 |---|---|---|
 | **001-mvp** | [constitution](specs/001-mvp/constitution.md) · [spec](specs/001-mvp/spec.md) · [plan](specs/001-mvp/plan.md) · [tasks](specs/001-mvp/tasks.md) | ✅ 交付 + 浏览器验收通过 |
-| **002-lossless-wasm** | [spec](specs/002-lossless-wasm/spec.md) · [plan](specs/002-lossless-wasm/plan.md) · [tasks](specs/002-lossless-wasm/tasks.md) | 📝 spec 已写，待实现（T-35 起） |
+| **002-lossless-wasm** | [spec](specs/002-lossless-wasm/spec.md) · [plan](specs/002-lossless-wasm/plan.md) · [tasks](specs/002-lossless-wasm/tasks.md) | ✅ 实现完成（首屏 hard gate 通过） |
 | 003+ | Web Worker pool / Tauri 桌面版 / AVIF | ⏳ 未规划 |
 
 ### MVP 实现 commit 轨迹（001）
@@ -92,6 +92,16 @@ cwebp/
 | `9a06e5c` | 4.4 | US-5 收尾：启动 feature-detect |
 | `8aec231` | 4.5 | 响应式微调 |
 | `dc6c403` | 4.6 | README + build 验证 + docs 同步 |
+| `050f17b` | — | Phase 2 spec + Pages deployment wiring |
+| `d887164` | — | Phase 2 3 条决策：首屏 hard gate / 删 converter.ts / 默认 WASM + idle prefetch |
+
+### Phase 2 实现 commit 轨迹（002）
+
+| Commit | Phase | 内容 |
+|---|---|---|
+| 本次 | 5.1–5.3 | encoder 策略分发：canvasEncoder / wasmEncoder / encoder 三文件；QualityControl 升级为 mode 二选一；App 支持 wasm 模式 + idle prefetch + 处理 gate；删 converter.ts |
+
+**构建结果**：首屏 critical 88.65 KB gzip（主 JS 84.19 + CSS 4.08 + HTML 0.38），< 100 KB 硬预算。WASM chunks（enc / enc_simd / dec）和 jsquash 入口都拆成独立 chunk，只在 `loadWasm()` 触发时才加载。
 
 **工作节奏**：每个 Phase 独立 commit；build 产物（`dist/`）在 `.gitignore` 里。
 
@@ -108,7 +118,7 @@ cwebp/
 
 ## 当前状态
 
-**MVP（001）浏览器验收通过**。线上部署 + Phase 2 spec 已就位，Phase 2 实现待启动。
+**MVP（001）+ Phase 2（002）实现已完成并通过首屏硬预算**。等用户在浏览器中验收 Phase 2 的三条 US（US-2.1 像素级保真、US-2.2 懒加载、US-2.3 失败降级）。
 
 ## 部署
 

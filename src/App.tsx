@@ -6,17 +6,21 @@ import { FileQueue } from './components/FileQueue';
 import { QualityControl } from './components/QualityControl';
 import {
   ConversionError,
-  convertToWebP,
+  encode,
+  getWasmState,
+  loadWasm,
+  subscribeWasmState,
   supportsWebPEncoding,
-} from './core/converter';
+  type EncoderMode,
+  type WasmLoadState,
+} from './core/encoder';
 import { useQueue, type FileItem } from './core/queue';
 import { useLocalStorage } from './hooks/useLocalStorage';
 
 const RECODE_DEBOUNCE_MS = 300;
 
 export function App() {
-  // Feature-detect WebP encoding at startup. Null = still checking, false =
-  // browser cannot encode WebP via Canvas toBlob (extremely rare in 2026).
+  // Startup feature-detect
   const [supportsWebP, setSupportsWebP] = useState<boolean | null>(null);
   useEffect(() => {
     void supportsWebPEncoding().then(setSupportsWebP);
@@ -26,30 +30,49 @@ export function App() {
 
   // Persisted user settings
   const [quality, setQuality] = useLocalStorage<number>('cwebp.quality', 80);
-  const [lossless, setLossless] = useLocalStorage<boolean>(
-    'cwebp.lossless',
-    false,
-  );
+  const [mode, setMode] = useLocalStorage<EncoderMode>('cwebp.mode', 'wasm');
 
-  // The processor effect reads latest opts from a ref so quality changes
-  // don't reshape its dependency array (avoids extra effect invocations).
-  const optsRef = useRef({ quality, lossless });
-  optsRef.current = { quality, lossless };
+  // Live WASM loading state for UI
+  const [wasmState, setWasmState] = useState<WasmLoadState>(getWasmState());
+  useEffect(() => subscribeWasmState(setWasmState), []);
 
-  // Debounced RECODE_ALL — waits until the user pauses dragging the slider.
-  const firstSettingsRender = useRef(true);
+  // Idle prefetch of WASM when the default mode (or user's saved choice) is wasm.
+  // Runs once per mount-and-mode so selecting WASM later also triggers a load.
   useEffect(() => {
-    if (firstSettingsRender.current) {
-      firstSettingsRender.current = false;
+    if (mode !== 'wasm') return;
+    if (getWasmState() === 'ready' || getWasmState() === 'loading') return;
+
+    const prefetch = () => {
+      void loadWasm().catch(() => {
+        // Silent — UI (WasmStateIndicator) will surface 'failed' via the subscription.
+      });
+    };
+
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(prefetch);
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(prefetch, 0);
+    return () => window.clearTimeout(id);
+  }, [mode]);
+
+  // Opts ref — processor reads latest values without being a dep
+  const optsRef = useRef({ quality, mode });
+  optsRef.current = { quality, mode };
+
+  // Debounced RECODE_ALL on quality or mode change
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
       return;
     }
     const t = setTimeout(() => {
       dispatch({ type: 'RECODE_ALL' });
     }, RECODE_DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [quality, lossless, dispatch]);
+  }, [quality, mode, dispatch]);
 
-  // Guard against React 18 StrictMode double-invoke
   const inFlight = useRef<Set<string>>(new Set());
 
   const handleFiles = useCallback(
@@ -59,7 +82,8 @@ export function App() {
     [dispatch],
   );
 
-  // Serial processor: one conversion at a time
+  // Serial processor. If mode === 'wasm' but the module isn't ready yet,
+  // the effect returns early; the wasmState dep re-triggers it once ready.
   useEffect(() => {
     const hasConverting = state.order.some(
       (id) => state.items[id]?.status === 'converting',
@@ -75,12 +99,20 @@ export function App() {
     const item = state.items[nextId];
     if (!item) return;
 
+    // WASM gate: don't start encoding in wasm mode until the module is ready
+    if (optsRef.current.mode === 'wasm' && wasmState !== 'ready') {
+      if (wasmState === 'idle') {
+        void loadWasm().catch(() => {});
+      }
+      return;
+    }
+
     inFlight.current.add(nextId);
     dispatch({ type: 'START_CONVERT', id: nextId });
 
     void (async () => {
       try {
-        const blob = await convertToWebP(item.file, { ...optsRef.current });
+        const blob = await encode(item.file, { ...optsRef.current });
         dispatch({ type: 'DONE', id: nextId, blob });
       } catch (e) {
         const msg =
@@ -90,9 +122,8 @@ export function App() {
         inFlight.current.delete(nextId);
       }
     })();
-  }, [state.items, state.order, dispatch]);
+  }, [state.items, state.order, dispatch, wasmState]);
 
-  // Flatten items for bulk actions (keep order)
   const items = useMemo<FileItem[]>(() => {
     const out: FileItem[] = [];
     for (const id of state.order) {
@@ -102,11 +133,12 @@ export function App() {
     return out;
   }, [state.items, state.order]);
 
-  // Early-return branches for unsupported browsers
-  if (supportsWebP === null) {
-    // Still detecting (usually <50ms); render nothing to avoid flash of fallback
-    return null;
-  }
+  const onRetryWasm = useCallback(() => {
+    void loadWasm().catch(() => {});
+  }, []);
+
+  // Early returns for unsupported browsers
+  if (supportsWebP === null) return null;
   if (supportsWebP === false) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
@@ -140,9 +172,11 @@ export function App() {
         <DropZone onFiles={handleFiles} />
         <QualityControl
           quality={quality}
-          lossless={lossless}
+          mode={mode}
+          wasmState={wasmState}
           onQualityChange={setQuality}
-          onLosslessChange={setLossless}
+          onModeChange={setMode}
+          onRetryWasm={onRetryWasm}
         />
         <FileQueue state={state} dispatch={dispatch} />
         <BulkActions items={items} />
