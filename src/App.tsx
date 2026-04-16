@@ -1,15 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle } from 'lucide-react';
 import { BulkActions } from './components/BulkActions';
 import { DropZone } from './components/DropZone';
 import { FileQueue } from './components/FileQueue';
 import { QualityControl } from './components/QualityControl';
-import { ConversionError, convertToWebP } from './core/converter';
+import {
+  ConversionError,
+  convertToWebP,
+  supportsWebPEncoding,
+} from './core/converter';
 import { useQueue, type FileItem } from './core/queue';
 import { useLocalStorage } from './hooks/useLocalStorage';
 
 const RECODE_DEBOUNCE_MS = 300;
 
 export function App() {
+  // Feature-detect WebP encoding at startup. Null = still checking, false =
+  // browser cannot encode WebP via Canvas toBlob (extremely rare in 2026).
+  const [supportsWebP, setSupportsWebP] = useState<boolean | null>(null);
+  useEffect(() => {
+    void supportsWebPEncoding().then(setSupportsWebP);
+  }, []);
+
   const [state, dispatch] = useQueue();
 
   // Persisted user settings
@@ -89,6 +101,27 @@ export function App() {
     }
     return out;
   }, [state.items, state.order]);
+
+  // Early-return branches for unsupported browsers
+  if (supportsWebP === null) {
+    // Still detecting (usually <50ms); render nothing to avoid flash of fallback
+    return null;
+  }
+  if (supportsWebP === false) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+        <div className="max-w-md rounded-xl border border-red-200 bg-white p-6 text-center shadow-sm">
+          <AlertCircle className="mx-auto h-10 w-10 text-red-500" aria-hidden="true" />
+          <h1 className="mt-3 text-lg font-semibold text-slate-900">
+            浏览器不支持 WebP 编码
+          </h1>
+          <p className="mt-2 text-sm text-slate-600">
+            请升级到最新版 Chrome / Edge / Safari / Firefox 后再试。
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
