@@ -52,7 +52,7 @@ export function DropZone({ onFiles }: DropZoneProps) {
       }}
       onDragLeave={() => setHover(false)}
       onDrop={onDrop}
-      className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-10 py-16 text-center transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+      className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-12 text-center transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:px-10 sm:py-16 ${
         hover
           ? 'border-blue-400 bg-blue-50/60'
           : 'border-slate-300 bg-white hover:border-slate-400'

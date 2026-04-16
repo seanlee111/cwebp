@@ -80,20 +80,21 @@ export function FileRow({ item, onRemove }: FileRowProps) {
             <button
               type="button"
               onClick={handleDownload}
-              className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              aria-label="下载 WebP"
+              className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:px-3"
             >
               <Download className="h-3.5 w-3.5" aria-hidden="true" />
-              下载
+              <span className="hidden sm:inline">下载</span>
             </button>
           </>
         )}
         {status === 'failed' && (
           <span
-            className="flex items-center gap-1 text-xs text-red-600"
+            className="flex max-w-[140px] items-center gap-1 truncate text-xs text-red-600 sm:max-w-none"
             title={error}
           >
-            <AlertCircle className="h-4 w-4" aria-hidden="true" />
-            {error ?? '失败'}
+            <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            <span className="truncate">{error ?? '失败'}</span>
           </span>
         )}
         <button
