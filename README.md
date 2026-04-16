@@ -25,18 +25,21 @@ npm run build
 
 ## 功能
 
-- 拖放 / 多选 PNG、JPEG 文件
+- 拖放 / 多选 PNG / JPEG / MP4 / WebM / MOV
 - 批量串行转换，单文件失败不阻塞其他文件
-- **双编码模式**：
+- **静态图双模式**：
   - **真无损（WASM，默认）** — `@jsquash/webp` + libwebp `-lossless`，像素级保真（含透明通道）
   - **高速（Canvas）** — 浏览器原生 `toBlob`，lossy，质量 0–100 可调
-- WASM 走动态 import + `requestIdleCallback` 后台预热，不占首屏预算
-- WASM 加载失败时 UI 有明确降级按钮（"改用 Canvas" / "重试"）
+- **视频 → animated WebP**（Phase 3）：
+  - 输入限制 ≤ 10 秒、≤ 1080p、≤ 50 MB；超过自动标红或降采样
+  - 参数：FPS（10/15/20/30）、质量（0–100）、循环次数（无限/一次）
+  - ffmpeg.wasm 单线程版，~10 MB core 首次使用时懒加载，浏览器 HTTP 缓存复用
+  - 顶部 banner 显示加载状态 / 失败时提供重试按钮
+- WASM / ffmpeg 都是独立 chunk + 动态 import，首屏预算 ≤ 100 KB gzip 硬门
 - 原始 → 输出体积对比与节省百分比
 - 单文件下载 / 全部打包 ZIP
 - 键盘可达；响应式到移动端
 - 启动 feature-detect，不支持 WebP 编码的浏览器显示明确提示
-- 单文件 > 50 MB 直接标记失败（避免浏览器 OOM）
 
 ## 隐私声明
 
@@ -60,9 +63,10 @@ npm run build
 - **Tailwind CSS 4** via `@tailwindcss/vite`
 - **JSZip** — ZIP 打包（STORE 模式，WebP 已压缩，跳过 deflate 省 CPU）
 - **lucide-react** — 图标
-- **@jsquash/webp** (Squoosh 团队) — WASM 版 libwebp，动态 import 拆独立 chunk
+- **@jsquash/webp** (Squoosh 团队) — 静态图 WASM 版 libwebp，动态 import 独立 chunk
+- **@ffmpeg/ffmpeg + @ffmpeg/core** (单线程版，Phase 3) — 视频 → animated WebP；core 约 10 MB gzip，懒加载
 
-生产构建首屏 **88.65 KB gzip**（HTML + CSS + JS 一次性加载）。WASM 编码器 chunk（enc ~115 KB + enc_simd ~128 KB + dec ~49 KB + 入口 ~16 KB，gzip 后）仅在进入 WASM 模式时加载。
+生产构建首屏 **90.87 KB gzip**（HTML + CSS + JS 一次性加载）。各编码器 chunk 只在进入对应模式时才加载。
 
 ## 目录结构
 
@@ -86,11 +90,12 @@ cwebp/
     │   ├── QualityControl.tsx   质量滑块 + 近无损
     │   └── BulkActions.tsx      全部下载 ZIP
     ├── core/
-    │   ├── encoder.ts            策略分发（canvas / wasm）+ 公共导出
+    │   ├── encoder.ts            策略分发（canvas / wasm / video）+ 公共导出
     │   ├── canvasEncoder.ts      Canvas toBlob 路径（lossy）
     │   ├── wasmEncoder.ts        @jsquash/webp 路径（lossless）+ 懒加载
+    │   ├── videoEncoder.ts       ffmpeg.wasm 视频 → animated WebP + 懒加载
     │   ├── errors.ts             共享 ConversionError
-    │   ├── queue.ts              useReducer 状态机
+    │   ├── queue.ts              useReducer 状态机（image / video 双 kind）
     │   └── zip.ts                JSZip 封装
     ├── hooks/
     │   └── useLocalStorage.ts   持久化设置
@@ -119,6 +124,13 @@ cwebp/
 ## Roadmap
 
 - ✅ Phase 2: `@jsquash/webp` 真正的 lossless WebP
-- ⏳ Phase 3: Web Worker 并行编码
+- ✅ Phase 3: ffmpeg.wasm 视频转 animated WebP
+- ⏳ Phase 3.1: 视频 trim / crop / Web Worker 并行 / 多线程 ffmpeg
 - ⏳ Phase 4: Tauri 桌面版（可输出到原目录）
 - ⏳ Phase 5: AVIF 输出支持（可选）
+
+## License 注意
+
+静态图路径（`@jsquash/webp`）License 为 Apache-2.0，商用兼容。
+
+**Phase 3 视频路径引入的 `@ffmpeg/core` 是 GPL-2.0-or-later**（强 copyleft）。本项目将其作为**运行时动态加载**的库使用（非静态链接），通常按聚合而非派生作品处理，但未来如要采用非 GPL-兼容 license 分发本项目，需重新评估或替换为 LGPL build。

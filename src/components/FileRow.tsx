@@ -2,11 +2,16 @@ import {
   AlertCircle,
   CheckCircle2,
   Download,
+  Film,
   Loader2,
   X,
 } from 'lucide-react';
 import type { FileItem } from '../core/queue';
-import { formatFileSize, formatSavings } from '../utils/fileSize';
+import {
+  formatDuration,
+  formatFileSize,
+  formatSavings,
+} from '../utils/fileSize';
 
 interface FileRowProps {
   readonly item: FileItem;
@@ -14,8 +19,18 @@ interface FileRowProps {
 }
 
 export function FileRow({ item, onRemove }: FileRowProps) {
-  const { file, status, originalSize, outputSize, error, thumbnailUrl, outputBlob } =
-    item;
+  const {
+    file,
+    kind,
+    status,
+    originalSize,
+    outputSize,
+    error,
+    thumbnailUrl,
+    outputBlob,
+    progress,
+    videoMeta,
+  } = item;
 
   const handleDownload = () => {
     if (!outputBlob) return;
@@ -26,25 +41,42 @@ export function FileRow({ item, onRemove }: FileRowProps) {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    // Revoke after a tick so the download finishes initiating
     setTimeout(() => URL.revokeObjectURL(url), 1_000);
   };
 
   return (
     <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3">
-      <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded bg-slate-100">
-        {thumbnailUrl && (
+      <div className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded bg-slate-100">
+        {thumbnailUrl ? (
           <img
             src={thumbnailUrl}
             alt=""
             className="h-full w-full object-cover"
           />
+        ) : (
+          kind === 'video' && (
+            <div className="flex h-full w-full items-center justify-center text-slate-400">
+              <Film className="h-6 w-6" aria-hidden="true" />
+            </div>
+          )
+        )}
+        {kind === 'video' && thumbnailUrl && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+            <Film className="h-5 w-5 text-white drop-shadow" aria-hidden="true" />
+          </div>
         )}
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-slate-900">
-          {file.name}
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium text-slate-900">
+            {file.name}
+          </span>
+          {kind === 'video' && videoMeta && (
+            <span className="flex-shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-slate-600">
+              {formatDuration(videoMeta.duration)}
+            </span>
+          )}
         </div>
         <div className="mt-0.5 text-xs text-slate-500">
           {formatFileSize(originalSize)}
@@ -69,10 +101,24 @@ export function FileRow({ item, onRemove }: FileRowProps) {
           <span className="text-xs text-slate-400">待处理</span>
         )}
         {status === 'converting' && (
-          <span className="flex items-center gap-1 text-xs text-slate-500">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            转换中
-          </span>
+          progress !== undefined ? (
+            <div className="flex w-28 items-center gap-2">
+              <div className="h-1.5 flex-1 rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-slate-900 transition-[width]"
+                  style={{ width: `${Math.round(progress * 100)}%` }}
+                />
+              </div>
+              <span className="w-9 text-right text-xs tabular-nums text-slate-500">
+                {Math.round(progress * 100)}%
+              </span>
+            </div>
+          ) : (
+            <span className="flex items-center gap-1 text-xs text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              转换中
+            </span>
+          )
         )}
         {status === 'done' && (
           <>

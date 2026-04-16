@@ -6,7 +6,13 @@ interface DropZoneProps {
   readonly onFiles: (files: File[]) => void;
 }
 
-const ACCEPTED_MIME = new Set(['image/png', 'image/jpeg']);
+function isAccepted(file: File): boolean {
+  return (
+    file.type === 'image/png' ||
+    file.type === 'image/jpeg' ||
+    file.type.startsWith('video/')
+  );
+}
 
 export function DropZone({ onFiles }: DropZoneProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -15,7 +21,7 @@ export function DropZone({ onFiles }: DropZoneProps) {
   const handleFiles = useCallback(
     (list: FileList | null) => {
       if (!list) return;
-      const files = Array.from(list).filter((f) => ACCEPTED_MIME.has(f.type));
+      const files = Array.from(list).filter(isAccepted);
       if (files.length > 0) onFiles(files);
     },
     [onFiles],
@@ -60,15 +66,15 @@ export function DropZone({ onFiles }: DropZoneProps) {
     >
       <ImageIcon className="h-12 w-12 text-slate-400" aria-hidden="true" />
       <p className="mt-4 text-base text-slate-700">
-        拖放图片到这里，或点击选择文件
+        拖放图片或视频到这里，或点击选择文件
       </p>
       <p className="mt-1 text-xs text-slate-400">
-        支持 PNG / JPEG · 多文件 · 本地处理，不上传
+        支持 PNG / JPEG · 10 秒内短视频（MP4 / WebM / MOV）· 本地处理，不上传
       </p>
       <input
         ref={inputRef}
         type="file"
-        accept="image/png,image/jpeg"
+        accept="image/png,image/jpeg,video/mp4,video/webm,video/quicktime"
         multiple
         hidden
         onChange={onChange}

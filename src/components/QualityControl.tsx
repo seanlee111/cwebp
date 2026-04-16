@@ -1,5 +1,8 @@
 import type { EncoderMode, WasmLoadState } from '../core/encoder';
 
+export type VideoFps = 10 | 15 | 20 | 30;
+export type VideoLoopCount = 0 | 1;
+
 interface QualityControlProps {
   readonly quality: number;
   readonly mode: EncoderMode;
@@ -7,7 +10,15 @@ interface QualityControlProps {
   readonly onQualityChange: (q: number) => void;
   readonly onModeChange: (m: EncoderMode) => void;
   readonly onRetryWasm: () => void;
+  /** Whether the queue contains any video tasks — toggles the video section. */
+  readonly hasVideo: boolean;
+  readonly fps: VideoFps;
+  readonly loopCount: VideoLoopCount;
+  readonly onFpsChange: (fps: VideoFps) => void;
+  readonly onLoopCountChange: (count: VideoLoopCount) => void;
 }
+
+const FPS_CHOICES: readonly VideoFps[] = [10, 15, 20, 30];
 
 export function QualityControl({
   quality,
@@ -16,6 +27,11 @@ export function QualityControl({
   onQualityChange,
   onModeChange,
   onRetryWasm,
+  hasVideo,
+  fps,
+  loopCount,
+  onFpsChange,
+  onLoopCountChange,
 }: QualityControlProps) {
   const qualityDisabled = mode === 'wasm';
 
@@ -49,7 +65,13 @@ export function QualityControl({
           <span className="text-sm text-slate-700">高速（Canvas）</span>
         </label>
 
-        {mode === 'wasm' && <WasmStateIndicator state={wasmState} onRetry={onRetryWasm} onFallback={() => onModeChange('canvas')} />}
+        {mode === 'wasm' && (
+          <WasmStateIndicator
+            state={wasmState}
+            onRetry={onRetryWasm}
+            onFallback={() => onModeChange('canvas')}
+          />
+        )}
       </fieldset>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -75,6 +97,56 @@ export function QualityControl({
         <p className="mt-2 text-xs text-slate-500">
           真无损模式使用 WASM libwebp，像素级保真（含透明通道）；质量参数不适用。编码较 Canvas 慢 2–3 倍。
         </p>
+      )}
+
+      {hasVideo && (
+        <div className="mt-4 border-t border-slate-200 pt-4">
+          <fieldset className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <legend className="sr-only">视频帧率</legend>
+            <span className="w-20 text-sm text-slate-700">帧率</span>
+            {FPS_CHOICES.map((v) => (
+              <label key={v} className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="fps"
+                  checked={fps === v}
+                  onChange={() => onFpsChange(v)}
+                  className="accent-slate-900"
+                />
+                <span className="text-sm text-slate-700">{v} fps</span>
+              </label>
+            ))}
+          </fieldset>
+
+          <fieldset className="mt-2 flex flex-wrap items-center gap-x-6 gap-y-2">
+            <legend className="sr-only">循环</legend>
+            <span className="w-20 text-sm text-slate-700">循环</span>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="loop"
+                checked={loopCount === 0}
+                onChange={() => onLoopCountChange(0)}
+                className="accent-slate-900"
+              />
+              <span className="text-sm text-slate-700">无限循环</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="loop"
+                checked={loopCount === 1}
+                onChange={() => onLoopCountChange(1)}
+                className="accent-slate-900"
+              />
+              <span className="text-sm text-slate-700">只播一次</span>
+            </label>
+          </fieldset>
+
+          <p className="mt-2 text-xs text-slate-500">
+            视频转 animated WebP：降帧率是缩小体积最有效的杠杆。质量滑块对视频同样适用。
+          </p>
+        </div>
       )}
     </div>
   );

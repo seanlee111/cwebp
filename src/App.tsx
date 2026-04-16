@@ -1,23 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import { BulkActions } from './components/BulkActions';
 import { DropZone } from './components/DropZone';
 import { FileQueue } from './components/FileQueue';
-import { QualityControl } from './components/QualityControl';
+import {
+  QualityControl,
+  type VideoFps,
+  type VideoLoopCount,
+} from './components/QualityControl';
 import {
   ConversionError,
+  captureVideoThumbnail,
   encode,
+  encodeVideo,
   getWasmState,
   loadWasm,
+  preloadVideoEncoder,
+  probeVideoMetadata,
+  subscribeVideoState,
   subscribeWasmState,
   supportsWebPEncoding,
   type EncoderMode,
+  type FfmpegLoadState,
   type WasmLoadState,
 } from './core/encoder';
 import { useQueue, type FileItem } from './core/queue';
 import { useLocalStorage } from './hooks/useLocalStorage';
 
 const RECODE_DEBOUNCE_MS = 300;
+const MAX_VIDEO_DURATION_SEC = 10;
 
 export function App() {
   // Startup feature-detect
@@ -31,23 +42,55 @@ export function App() {
   // Persisted user settings
   const [quality, setQuality] = useLocalStorage<number>('cwebp.quality', 80);
   const [mode, setMode] = useLocalStorage<EncoderMode>('cwebp.mode', 'wasm');
+  const [fps, setFps] = useLocalStorage<VideoFps>('cwebp.video.fps', 15);
+  const [loopCount, setLoopCount] = useLocalStorage<VideoLoopCount>(
+    'cwebp.video.loop',
+    0,
+  );
 
-  // Live WASM loading state for UI
+  // Live WASM state
   const [wasmState, setWasmState] = useState<WasmLoadState>(getWasmState());
   useEffect(() => subscribeWasmState(setWasmState), []);
 
-  // Idle prefetch of WASM when the default mode (or user's saved choice) is wasm.
-  // Runs once per mount-and-mode so selecting WASM later also triggers a load.
+  // Live ffmpeg state — only subscribed once there's a video task
+  const [videoState, setVideoState] = useState<FfmpegLoadState>('idle');
+
+  // Derived: does the current queue contain any video item?
+  const hasVideoTask = useMemo(
+    () => state.order.some((id) => state.items[id]?.kind === 'video'),
+    [state.items, state.order],
+  );
+
+  // Subscribe to ffmpeg state when a video enters the queue
+  useEffect(() => {
+    if (!hasVideoTask) return;
+    let cleanup: (() => void) | null = null;
+    let cancelled = false;
+    void subscribeVideoState(setVideoState).then((u) => {
+      if (cancelled) u();
+      else cleanup = u;
+    });
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [hasVideoTask]);
+
+  // Pre-warm ffmpeg the moment a video is queued, so probe + encode don't wait
+  useEffect(() => {
+    if (!hasVideoTask) return;
+    void preloadVideoEncoder().catch(() => {
+      // UI will reflect 'failed' state via the subscription above
+    });
+  }, [hasVideoTask]);
+
+  // Idle prefetch of WASM encoder for the image side
   useEffect(() => {
     if (mode !== 'wasm') return;
     if (getWasmState() === 'ready' || getWasmState() === 'loading') return;
-
     const prefetch = () => {
-      void loadWasm().catch(() => {
-        // Silent — UI (WasmStateIndicator) will surface 'failed' via the subscription.
-      });
+      void loadWasm().catch(() => {});
     };
-
     if (typeof window.requestIdleCallback === 'function') {
       const id = window.requestIdleCallback(prefetch);
       return () => window.cancelIdleCallback(id);
@@ -56,11 +99,38 @@ export function App() {
     return () => window.clearTimeout(id);
   }, [mode]);
 
-  // Opts ref — processor reads latest values without being a dep
-  const optsRef = useRef({ quality, mode });
-  optsRef.current = { quality, mode };
+  // Async video thumbnail generation
+  const thumbnailingRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const id of state.order) {
+      const item = state.items[id];
+      if (!item) continue;
+      if (
+        item.kind === 'video' &&
+        !item.thumbnailUrl &&
+        !thumbnailingRef.current.has(id) &&
+        item.status !== 'failed'
+      ) {
+        thumbnailingRef.current.add(id);
+        void captureVideoThumbnail(item.file)
+          .then((dataUrl) => {
+            dispatch({ type: 'SET_THUMBNAIL', id, thumbnailUrl: dataUrl });
+          })
+          .catch(() => {
+            // Silent — FileRow will show the film-icon placeholder
+          })
+          .finally(() => {
+            thumbnailingRef.current.delete(id);
+          });
+      }
+    }
+  }, [state.items, state.order, dispatch]);
 
-  // Debounced RECODE_ALL on quality or mode change
+  // Opts ref — processor reads the latest without being a dep
+  const optsRef = useRef({ quality, mode, fps, loopCount });
+  optsRef.current = { quality, mode, fps, loopCount };
+
+  // Debounced RECODE_ALL on any parameter change
   const firstRender = useRef(true);
   useEffect(() => {
     if (firstRender.current) {
@@ -71,7 +141,7 @@ export function App() {
       dispatch({ type: 'RECODE_ALL' });
     }, RECODE_DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [quality, mode, dispatch]);
+  }, [quality, mode, fps, loopCount, dispatch]);
 
   const inFlight = useRef<Set<string>>(new Set());
 
@@ -82,8 +152,7 @@ export function App() {
     [dispatch],
   );
 
-  // Serial processor. If mode === 'wasm' but the module isn't ready yet,
-  // the effect returns early; the wasmState dep re-triggers it once ready.
+  // Unified serial processor: routes to the image or video pipeline by kind.
   useEffect(() => {
     const hasConverting = state.order.some(
       (id) => state.items[id]?.status === 'converting',
@@ -99,24 +168,63 @@ export function App() {
     const item = state.items[nextId];
     if (!item) return;
 
-    // WASM gate: don't start encoding in wasm mode until the module is ready
-    if (optsRef.current.mode === 'wasm' && wasmState !== 'ready') {
-      if (wasmState === 'idle') {
-        void loadWasm().catch(() => {});
+    if (item.kind === 'image') {
+      if (optsRef.current.mode === 'wasm' && wasmState !== 'ready') {
+        if (wasmState === 'idle') {
+          void loadWasm().catch(() => {});
+        }
+        return;
       }
+
+      inFlight.current.add(nextId);
+      dispatch({ type: 'START_CONVERT', id: nextId });
+
+      void (async () => {
+        try {
+          const blob = await encode(item.file, {
+            mode: optsRef.current.mode,
+            quality: optsRef.current.quality,
+          });
+          dispatch({ type: 'DONE', id: nextId, blob });
+        } catch (e) {
+          const msg =
+            e instanceof ConversionError ? e.message : '转换失败（未知错误）';
+          dispatch({ type: 'FAIL', id: nextId, error: msg });
+        } finally {
+          inFlight.current.delete(nextId);
+        }
+      })();
       return;
     }
 
+    // Video pipeline
     inFlight.current.add(nextId);
     dispatch({ type: 'START_CONVERT', id: nextId });
 
     void (async () => {
       try {
-        const blob = await encode(item.file, { ...optsRef.current });
+        const meta = await probeVideoMetadata(item.file);
+        dispatch({ type: 'SET_VIDEO_META', id: nextId, meta });
+
+        if (meta.duration > MAX_VIDEO_DURATION_SEC) {
+          throw new ConversionError(
+            `视频时长 ${meta.duration.toFixed(1)}s 超过 ${MAX_VIDEO_DURATION_SEC} 秒上限`,
+          );
+        }
+
+        const blob = await encodeVideo(
+          item.file,
+          {
+            fps: optsRef.current.fps,
+            quality: optsRef.current.quality,
+            loopCount: optsRef.current.loopCount,
+          },
+          (p) => dispatch({ type: 'PROGRESS', id: nextId, progress: p }),
+        );
         dispatch({ type: 'DONE', id: nextId, blob });
       } catch (e) {
         const msg =
-          e instanceof ConversionError ? e.message : '转换失败（未知错误）';
+          e instanceof ConversionError ? e.message : '视频转换失败（未知错误）';
         dispatch({ type: 'FAIL', id: nextId, error: msg });
       } finally {
         inFlight.current.delete(nextId);
@@ -137,7 +245,10 @@ export function App() {
     void loadWasm().catch(() => {});
   }, []);
 
-  // Early returns for unsupported browsers
+  const onRetryFfmpeg = useCallback(() => {
+    void preloadVideoEncoder().catch(() => {});
+  }, []);
+
   if (supportsWebP === null) return null;
   if (supportsWebP === false) {
     return (
@@ -160,15 +271,37 @@ export function App() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-5xl px-6 py-4">
           <h1 className="text-xl font-semibold tracking-tight">
-            cwebp · 本地图片转 WebP
+            cwebp · 本地图片/视频转 WebP
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            本地处理，文件不上传 · PNG / JPEG → WebP
+            本地处理，文件不上传 · PNG / JPEG · 10s 内视频 → animated WebP
           </p>
         </div>
       </header>
 
       <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10">
+        {hasVideoTask && videoState === 'loading' && (
+          <div className="flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+            <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" aria-hidden="true" />
+            <span>
+              正在加载视频编码器（约 10 MB，第一次较慢，加载后浏览器会缓存）…
+            </span>
+          </div>
+        )}
+        {hasVideoTask && videoState === 'failed' && (
+          <div className="flex items-center gap-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            <span className="flex-1">视频编码器加载失败。</span>
+            <button
+              type="button"
+              onClick={onRetryFfmpeg}
+              className="rounded border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+            >
+              重试
+            </button>
+          </div>
+        )}
+
         <DropZone onFiles={handleFiles} />
         <QualityControl
           quality={quality}
@@ -177,6 +310,11 @@ export function App() {
           onQualityChange={setQuality}
           onModeChange={setMode}
           onRetryWasm={onRetryWasm}
+          hasVideo={hasVideoTask}
+          fps={fps}
+          loopCount={loopCount}
+          onFpsChange={setFps}
+          onLoopCountChange={setLoopCount}
         />
         <FileQueue state={state} dispatch={dispatch} />
         <BulkActions items={items} />

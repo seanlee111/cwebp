@@ -19,3 +19,12 @@ export function formatSavings(original: number, output: number): string {
   const sign = delta < 0 ? '-' : '+';
   return `${sign}${Math.abs(delta * 100).toFixed(0)}%`;
 }
+
+/** Format seconds as m:ss (e.g. 65 → "1:05", 3 → "0:03"). */
+export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '—';
+  const total = Math.round(seconds);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}

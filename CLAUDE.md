@@ -78,7 +78,7 @@ cwebp/
 |---|---|---|
 | **001-mvp** | [constitution](specs/001-mvp/constitution.md) · [spec](specs/001-mvp/spec.md) · [plan](specs/001-mvp/plan.md) · [tasks](specs/001-mvp/tasks.md) | ✅ 交付 + 浏览器验收通过 |
 | **002-lossless-wasm** | [spec](specs/002-lossless-wasm/spec.md) · [plan](specs/002-lossless-wasm/plan.md) · [tasks](specs/002-lossless-wasm/tasks.md) | ✅ 实现完成（首屏 hard gate 通过） |
-| **003-animated-video** | [spec](specs/003-animated-video/spec.md) · [plan](specs/003-animated-video/plan.md) · [tasks](specs/003-animated-video/tasks.md) | 📝 spec 已写，实现中（ffmpeg.wasm 方案） |
+| **003-animated-video** | [spec](specs/003-animated-video/spec.md) · [plan](specs/003-animated-video/plan.md) · [tasks](specs/003-animated-video/tasks.md) | ✅ 实现完成（首屏 90.87 KB gzip，ffmpeg core 独立 chunk） |
 | 004+ | Web Worker pool / Tauri 桌面版 / AVIF / trim 等视频 UX 增强 | ⏳ 未规划 |
 
 ### MVP 实现 commit 轨迹（001）
@@ -100,9 +100,21 @@ cwebp/
 
 | Commit | Phase | 内容 |
 |---|---|---|
-| 本次 | 5.1–5.3 | encoder 策略分发：canvasEncoder / wasmEncoder / encoder 三文件；QualityControl 升级为 mode 二选一；App 支持 wasm 模式 + idle prefetch + 处理 gate；删 converter.ts |
+| `86e63d0` | 5.1–5.3 | encoder 策略分发：canvasEncoder / wasmEncoder / encoder 三文件；QualityControl 升级为 mode 二选一；App 支持 wasm 模式 + idle prefetch + 处理 gate；删 converter.ts |
 
-**构建结果**：首屏 critical 88.65 KB gzip（主 JS 84.19 + CSS 4.08 + HTML 0.38），< 100 KB 硬预算。WASM chunks（enc / enc_simd / dec）和 jsquash 入口都拆成独立 chunk，只在 `loadWasm()` 触发时才加载。
+**Phase 2 构建结果**：首屏 critical 88.65 KB gzip，< 100 KB 硬预算。WASM chunks（enc / enc_simd / dec）都拆成独立 chunk。
+
+### Phase 3 实现 commit 轨迹（003）
+
+| Commit | Phase | 内容 |
+|---|---|---|
+| `2e5dd61` | — | Phase 3 spec（方案 A：ffmpeg.wasm 单线程 + 用户拍板） |
+| 本次 | 6.1–6.5 | queue.ts 加 kind/progress/videoMeta/SET_THUMBNAIL/PROGRESS；videoEncoder.ts 懒加载 @ffmpeg/ffmpeg + @ffmpeg/core + @ffmpeg/util；encoder.ts 加 encodeVideo/probeVideoMetadata/captureVideoThumbnail/subscribeVideoState/preloadVideoEncoder；DropZone accept 扩展；QualityControl 加视频参数区；FileRow 加进度条 + 时长 badge；App 加视频状态订阅 / thumbnail 生成 / processor 视频分支 / 顶部加载 banner |
+
+**Phase 3 构建结果**：
+- 首屏 critical **90.87 KB gzip**（主 JS 85.89 + CSS 4.60 + HTML 0.38），< 100 KB 硬预算，余量 9 KB
+- ffmpeg-core.wasm 10.29 MB gzip 独立 chunk，仅在 `loadFfmpeg()` 触发时才 fetch
+- videoEncoder.ts 1.49 KB gzip 独立 chunk
 
 **工作节奏**：每个 Phase 独立 commit；build 产物（`dist/`）在 `.gitignore` 里。
 
@@ -119,9 +131,14 @@ cwebp/
 
 ## 当前状态
 
-**MVP（001）+ Phase 2（002）实现已完成并通过首屏硬预算**。Phase 3（视频 → animated WebP）spec 已写完，选型 **ffmpeg.wasm 单线程版**（用户拍板），实现进行中。
+**MVP（001）+ Phase 2（002）+ Phase 3（003）全部实现完成**。全程守住 **首屏 ≤ 100 KB gzip** 硬门（当前 **90.87 KB gzip**）。三大功能线：
 
-Phase 2 的三条 US（像素级保真 / 懒加载 / 失败降级）用户将与 Phase 3 一起在浏览器验收。
+- 静态图 Canvas 编码（快） · 静态图 WASM lossless（jsquash，懒加载）
+- 视频 → animated WebP（ffmpeg.wasm 单线程，懒加载 ~10 MB core）
+
+待用户浏览器验收 Phase 2 的 3 条 US 和 Phase 3 的 4 条 US（见各 spec.md）。
+
+**Phase 3 License 注意**：`@ffmpeg/core@0.12.10` 是 **GPL-2.0-or-later**，相比其它依赖（MIT / Apache-2.0）属于强 copyleft。这是**运行时动态加载**的库（非静态链接），通常按聚合而非派生作品处理。如果本项目未来决定采用非兼容 license（如商用闭源），需重新评估或走 LGPL build。
 
 ## 部署
 
