@@ -74,26 +74,24 @@ cwebp/
 
 参考 [GitHub Spec Kit](https://github.com/github/spec-kit) 的分阶段做法：
 
-| 阶段 | 产出 | 状态 |
+| Iteration | 产出 | 状态 |
 |---|---|---|
-| 0. Constitution | [specs/001-mvp/constitution.md](specs/001-mvp/constitution.md) | ✅ 已写 |
-| 1. Specify (WHAT) | [specs/001-mvp/spec.md](specs/001-mvp/spec.md) | ✅ 已写 |
-| 2. Plan (HOW) | [specs/001-mvp/plan.md](specs/001-mvp/plan.md) | ✅ 已写 |
-| 3. Tasks | [specs/001-mvp/tasks.md](specs/001-mvp/tasks.md) | ✅ 已写 |
-| 4. Implement | `src/` 下的真实代码 | ✅ MVP 完成 |
+| **001-mvp** | [constitution](specs/001-mvp/constitution.md) · [spec](specs/001-mvp/spec.md) · [plan](specs/001-mvp/plan.md) · [tasks](specs/001-mvp/tasks.md) | ✅ 交付 + 浏览器验收通过 |
+| **002-lossless-wasm** | [spec](specs/002-lossless-wasm/spec.md) · [plan](specs/002-lossless-wasm/plan.md) · [tasks](specs/002-lossless-wasm/tasks.md) | 📝 spec 已写，待实现（T-35 起） |
+| 003+ | Web Worker pool / Tauri 桌面版 / AVIF | ⏳ 未规划 |
 
-### 实现 commit 轨迹
+### MVP 实现 commit 轨迹（001）
 
 | Commit | Phase | 内容 |
 |---|---|---|
-| `57a6ab1` | — | initial specs 基线（constitution / spec / plan / tasks） |
+| `57a6ab1` | — | initial specs 基线 |
 | `b1eb479` | 4.0 | 脚手架：Vite 6 + React 18 + TS strict + Tailwind 4 |
-| `7d2deac` | 4.1 | 转换核心：converter / queue 状态类型 / fileSize / id |
-| `911fe17` | 4.2 | US-1 最小 UI：DropZone / FileRow / FileQueue 串联 |
-| `005d0e6` | 4.3 | US-2 + US-3：批量、质量滑块、debounce 重编码、ZIP 打包 |
-| `9a06e5c` | 4.4 | US-5 收尾：启动 feature-detect fallback（另 US-5 渲染 / 50MB 上限已在 4.2/4.3 落地） |
-| `8aec231` | 4.5 | 响应式微调：窄屏下 FileRow 下载按钮 icon-only、错误 truncate |
-| Phase 4.6 | — | build 验证 + README + CLAUDE.md 同步（本 commit） |
+| `7d2deac` | 4.1 | 转换核心：converter / queue / utils |
+| `911fe17` | 4.2 | US-1 最小 UI：DropZone / FileRow / FileQueue |
+| `005d0e6` | 4.3 | US-2 + US-3：批量、质量滑块、ZIP 打包 |
+| `9a06e5c` | 4.4 | US-5 收尾：启动 feature-detect |
+| `8aec231` | 4.5 | 响应式微调 |
+| `dc6c403` | 4.6 | README + build 验证 + docs 同步 |
 
 **工作节奏**：每个 Phase 独立 commit；build 产物（`dist/`）在 `.gitignore` 里。
 
@@ -110,28 +108,25 @@ cwebp/
 
 ## 当前状态
 
-**MVP 代码完成，待用户在浏览器中跑完 6 条验收**（见"MVP 成功判定"章节）。
+**MVP（001）浏览器验收通过**。线上部署 + Phase 2 spec 已就位，Phase 2 实现待启动。
 
-静态层面已确认：
-- TypeScript strict 全通过（`npm run typecheck`）
-- `npm run build` 成功，产物 82 KB gzip
-- `src/` 下无任何 `fetch` / `XMLHttpRequest` / `WebSocket` / 外部 URL 引用（grep 自证 Constitution P1）
-- `dist/` 用相对路径资源，可直接 `file://` 打开
+## 部署
 
-运行时验收（6 条）需要用户真实拖一批图进 UI 并观察：
-1. 10 张混合 PNG/JPEG 全部转换成功 ← **需浏览器测试**
-2. 质量滑块 300ms 后所有文件重编码并刷新体积 ← **需浏览器测试**
-3. 1920×1080 JPEG 质量 80 输出 < 原图 85%（体积依赖原图内容）← **需浏览器测试**
-4. 透明 PNG 透明通道保留（Canvas 已开 `alpha: true`）← **需浏览器测试**
-5. DevTools Network 面板无出站请求 ← **代码层已静态证明**；运行时双重确认
-6. Chrome / Edge / Safari / Firefox 均工作（依赖浏览器 toBlob WebP ≥ 97% 覆盖率）← **需跨浏览器测试**
+| 维度 | 配置 |
+|---|---|
+| 仓库 | [github.com/seanlee111/cwebp](https://github.com/seanlee111/cwebp)（公有） |
+| 托管 | GitHub Pages |
+| 流程 | 每次 push main → `.github/workflows/deploy.yml` → `npm run build:pages` → Pages |
+| URL | https://seanlee111.github.io/cwebp/ |
+| Vite base | 生产 `mode=pages` 时 `/cwebp/`；其它 `./`（保持 `file://` 直开能力） |
+
+每次改动主分支会自动重新构建发布。如需立即触发：Actions 面板 → Deploy to GitHub Pages → Run workflow。
 
 ## 下一步
 
-- **用户**：浏览器里跑一遍 6 条验收，有问题反馈
-- **如需部署**：`npm run build` 后把 `dist/` 上传到任意静态托管
-- **如要进 Phase 2+**：独立新 spec（`specs/002-xxx`），参见 [plan.md §9](specs/001-mvp/plan.md) 的 Roadmap
+- **Phase 2 实现**：待用户审 [specs/002-lossless-wasm/](specs/002-lossless-wasm/) 三份文档（spec / plan / tasks）后按 T-35 起开工
+- **进入 Phase 3/4/5**：各自独立 spec，参见 [001/plan.md §9 Roadmap](specs/001-mvp/plan.md)
 
 ---
 
-_最后更新：2026-04-16（MVP 完成）_
+_最后更新：2026-04-16（MVP 完成 + Phase 2 spec 就位 + Pages 部署配置完成）_
