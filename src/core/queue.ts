@@ -1,9 +1,10 @@
 import { useReducer } from 'react';
 import type { Dispatch, Reducer } from 'react';
 import { makeId } from '../utils/id';
+import { naturalCompare } from '../utils/naturalSort';
 
 export type FileStatus = 'pending' | 'converting' | 'done' | 'failed';
-export type FileKind = 'image' | 'video';
+export type FileKind = 'image' | 'video' | 'sequence';
 
 export interface VideoMeta {
   readonly duration: number; // seconds
@@ -26,6 +27,10 @@ export interface FileItem {
   readonly progress?: number;
   /** Populated after metadata probe for video items. */
   readonly videoMeta?: VideoMeta;
+  /** Phase 5: present iff kind==='sequence'. Sorted input frames. */
+  readonly sequenceFrames?: readonly File[];
+  /** Phase 5: cached frame count for UI; === sequenceFrames.length. */
+  readonly sequenceFrameCount?: number;
 }
 
 export interface QueueState {
@@ -35,6 +40,7 @@ export interface QueueState {
 
 export type QueueAction =
   | { type: 'ADD_FILES'; files: readonly File[] }
+  | { type: 'ADD_SEQUENCE'; files: readonly File[] }
   | { type: 'START_CONVERT'; id: string }
   | { type: 'PROGRESS'; id: string; progress: number }
   | { type: 'SET_VIDEO_META'; id: string; meta: VideoMeta }
@@ -114,6 +120,32 @@ const reducer: Reducer<QueueState, QueueAction> = (state, action) => {
         order.push(next.id);
       }
       return { items, order };
+    }
+
+    case 'ADD_SEQUENCE': {
+      const sorted = [...action.files].sort((a, b) =>
+        naturalCompare(a.name, b.name),
+      );
+      if (sorted.length === 0) return state;
+      const first = sorted[0];
+      if (!first) return state;
+      const originalSize = sorted.reduce((s, f) => s + f.size, 0);
+      const id = makeId();
+      const next: FileItem = {
+        id,
+        file: first,
+        kind: 'sequence',
+        status: 'pending',
+        originalSize,
+        thumbnailUrl: URL.createObjectURL(first),
+        sequenceFrames: sorted,
+        sequenceFrameCount: sorted.length,
+      };
+      return {
+        ...state,
+        items: { ...state.items, [id]: next },
+        order: [...state.order, id],
+      };
     }
 
     case 'START_CONVERT': {
@@ -222,6 +254,12 @@ const reducer: Reducer<QueueState, QueueAction> = (state, action) => {
       for (const id of state.order) {
         const old = state.items[id];
         if (!old) continue;
+        // Sequence composition is a one-shot action — don't re-run when
+        // quality/fps/loopCount change. User can delete & recompose manually.
+        if (old.kind === 'sequence') {
+          items[id] = old;
+          continue;
+        }
         if (old.status === 'failed' && old.originalSize > sizeCapFor(old.kind)) {
           items[id] = old;
           continue;

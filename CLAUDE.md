@@ -80,7 +80,7 @@ cwebp/
 | **002-lossless-wasm** | [spec](specs/002-lossless-wasm/spec.md) · [plan](specs/002-lossless-wasm/plan.md) · [tasks](specs/002-lossless-wasm/tasks.md) | ✅ 实现完成（首屏 hard gate 通过） |
 | **003-animated-video** | [spec](specs/003-animated-video/spec.md) · [plan](specs/003-animated-video/plan.md) · [tasks](specs/003-animated-video/tasks.md) | ✅ 实现完成（首屏 90.87 KB gzip，ffmpeg core 独立 chunk） |
 | **004-bigger-and-worker** | [spec](specs/004-bigger-and-worker/spec.md) · [plan](specs/004-bigger-and-worker/plan.md) · [tasks](specs/004-bigger-and-worker/tasks.md) | ✅ 实现完成（图 200 MB / 视频 500 MB / 时长 30s；静态图 Worker 化；首屏 92 KB gzip） |
-| **005-image-sequence** | [spec](specs/005-image-sequence/spec.md) · [plan](specs/005-image-sequence/plan.md) · [tasks](specs/005-image-sequence/tasks.md) | 📝 spec 已写，实现中（序列 PNG/JPEG → 透明 animated WebP） |
+| **005-image-sequence** | [spec](specs/005-image-sequence/spec.md) · [plan](specs/005-image-sequence/plan.md) · [tasks](specs/005-image-sequence/tasks.md) | ✅ 实现完成（序列 PNG/JPEG → 透明 animated WebP；首屏 93 KB gzip） |
 | 006+ | 多文件并发 / 视频 trim / Tauri 桌面版 / AVIF | ⏳ 未规划 |
 
 ### MVP 实现 commit 轨迹（001）
@@ -130,6 +130,18 @@ cwebp/
 - `encoder.worker-*.js` 独立 chunk，静态图编码脱离主线程
 - 其它 chunk 拆分和 Phase 3 一致
 
+### Phase 5 实现 commit 轨迹（005）
+
+| Commit | Phase | 内容 |
+|---|---|---|
+| `094f5f7` | — | Phase 5 spec（序列 PNG/JPEG → 透明 animated WebP） |
+| 本次 | 8.0–8.3 | utils/naturalSort.ts；queue.ts 加 kind='sequence' + sequenceFrames + sequenceFrameCount + ADD_SEQUENCE action（自然排序）；RECODE_ALL 跳过 sequence；videoEncoder.ts 加 encodeSequenceToWebP（预处理 OffscreenCanvas 统一 PNG 写 MEMFS + ffmpeg -pix_fmt yuva420p 保留透明，进度两段 0–0.5 / 0.5–1）；encoder.ts 加 encodeSequence 包装；SequenceActions 底部按钮（图 ≥ 2 出现，300 MB 上限 disable）；FileRow 支持 sequence kind（Film 图标 overlay、"合成动图（N 帧）" 名、sequence 下载文件名 `sequence-N-frames-YYYYMMDD.webp`）；App.tsx processor sequence 分支、needsFfmpeg（video 或 sequence）替代 hasVideoTask 触发 ffmpeg 预热 |
+
+**Phase 5 构建结果**：
+- 首屏 critical **93.02 KB gzip**（主 JS 87.81 + CSS 4.83 + HTML 0.38），< 100 KB 硬预算，余量 7 KB
+- videoEncoder chunk 从 1.49 KB → 2.19 KB gzip（加了预处理 + encodeSequenceToWebP 函数）
+- 零新依赖：复用 Phase 3 的 ffmpeg.wasm
+
 **工作节奏**：每个 Phase 独立 commit；build 产物（`dist/`）在 `.gitignore` 里。
 
 ## MVP 成功判定（验收标准）
@@ -145,14 +157,15 @@ cwebp/
 
 ## 当前状态
 
-**MVP（001）+ Phase 2 / 3 / 4 实现完成**。全程守住 **首屏 ≤ 100 KB gzip** 硬门（当前 **92.03 KB gzip**）。四大功能线：
+**MVP（001）+ Phase 2 / 3 / 4 / 5 实现完成**。全程守住 **首屏 ≤ 100 KB gzip** 硬门（当前 **93.02 KB gzip**）。五大功能线：
 
 - 静态图 Canvas 编码 · 静态图 WASM lossless（jsquash，懒加载）
 - 视频 → animated WebP（ffmpeg.wasm 单线程，懒加载 ~10 MB core）
-- **静态图编码整体搬到 Web Worker**（Phase 4，大图不卡 UI；不支持 Worker/OffscreenCanvas 时自动降级主线程）
-- **上限放宽**：图 200 MB / 视频 500 MB / 视频时长 30 s；大文件有 tooltip 预估和顶部 banner
+- 静态图编码整体搬到 Web Worker（Phase 4，大图不卡 UI；不支持时自动降级主线程）
+- 上限放宽：图 200 MB / 视频 500 MB / 视频时长 30 s；大文件有 tooltip 预估和顶部 banner
+- **序列图 → 动图**（Phase 5，复用 Phase 3 的 ffmpeg；默认 `-pix_fmt yuva420p` 保留透明；队列 ≥ 2 张图时底部出现"合成为动图"按钮；总 ≤ 300 MB；自然排序）
 
-待用户浏览器验收 Phase 4 的 4 条 US（US-4.1 大图可入队 / US-4.2 30s 视频 / US-4.3 大文件警告 / US-4.4 UI 不卡）。
+待用户浏览器验收 Phase 5 的 5 条 US（US-5.1 按钮出现 / US-5.2 合成成功 / US-5.3 透明保留 / US-5.4 尺寸对齐 / US-5.5 上限硬门）。
 
 **Phase 3 License 注意**：`@ffmpeg/core@0.12.10` 是 **GPL-2.0-or-later**，相比其它依赖（MIT / Apache-2.0）属于强 copyleft。这是**运行时动态加载**的库（非静态链接），通常按聚合而非派生作品处理。如果本项目未来决定采用非兼容 license（如商用闭源），需重新评估或走 LGPL build。
 

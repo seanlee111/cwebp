@@ -45,7 +45,7 @@ export function FileRow({ item, onRemove, imageMode }: FileRowProps) {
     const url = URL.createObjectURL(outputBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = replaceExt(file.name, '.webp');
+    a.download = downloadNameFor(item);
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -62,13 +62,13 @@ export function FileRow({ item, onRemove, imageMode }: FileRowProps) {
             className="h-full w-full object-cover"
           />
         ) : (
-          kind === 'video' && (
+          (kind === 'video' || kind === 'sequence') && (
             <div className="flex h-full w-full items-center justify-center text-slate-400">
               <Film className="h-6 w-6" aria-hidden="true" />
             </div>
           )
         )}
-        {kind === 'video' && thumbnailUrl && (
+        {(kind === 'video' || kind === 'sequence') && thumbnailUrl && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/20">
             <Film className="h-5 w-5 text-white drop-shadow" aria-hidden="true" />
           </div>
@@ -78,7 +78,9 @@ export function FileRow({ item, onRemove, imageMode }: FileRowProps) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-slate-900">
-            {file.name}
+            {kind === 'sequence'
+              ? `合成动图（${item.sequenceFrameCount ?? 0} 帧）`
+              : file.name}
           </span>
           {kind === 'video' && videoMeta && (
             <span className="flex-shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-slate-600">
@@ -177,4 +179,17 @@ function replaceExt(name: string, newExt: string): string {
   const dot = name.lastIndexOf('.');
   if (dot <= 0) return name + newExt;
   return name.slice(0, dot) + newExt;
+}
+
+function downloadNameFor(item: FileItem): string {
+  if (item.kind === 'sequence') {
+    const n = item.sequenceFrameCount ?? 0;
+    const d = new Date();
+    const ymd =
+      d.getFullYear().toString() +
+      String(d.getMonth() + 1).padStart(2, '0') +
+      String(d.getDate()).padStart(2, '0');
+    return `sequence-${n}-frames-${ymd}.webp`;
+  }
+  return replaceExt(item.file.name, '.webp');
 }

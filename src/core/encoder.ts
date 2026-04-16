@@ -114,6 +114,16 @@ export async function encodeVideo(
   return mod.encodeVideoToWebP(file, opts, onProgress);
 }
 
+/** Phase 5: compose an ordered array of static frames into one animated WebP. */
+export async function encodeSequence(
+  files: readonly File[],
+  opts: VideoEncodeOptions,
+  onProgress: (p: number) => void,
+): Promise<Blob> {
+  const mod = await loadVideoModule();
+  return mod.encodeSequenceToWebP(files, opts, onProgress);
+}
+
 export async function probeVideoMetadata(file: File): Promise<VideoMetadata> {
   const mod = await loadVideoModule();
   return mod.probeVideoMetadata(file);

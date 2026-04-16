@@ -173,6 +173,177 @@ export async function captureFirstFrame(file: File): Promise<string> {
 }
 
 /**
+ * Phase 5: preprocess one input frame (PNG / JPEG) into a PNG Uint8Array of
+ * the target size. OffscreenCanvas on browsers that support it, DOM canvas
+ * fallback otherwise. `clearRect` before draw guarantees a transparent base
+ * so ffmpeg's `-pix_fmt yuva420p` has a clean alpha channel to preserve.
+ */
+async function preprocessFrameToPng(
+  file: File,
+  width: number,
+  height: number,
+): Promise<Uint8Array> {
+  const bitmap = await createImageBitmap(file);
+  const useOffscreen = typeof OffscreenCanvas !== 'undefined';
+
+  let blob: Blob;
+  try {
+    if (useOffscreen) {
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext('2d', { alpha: true });
+      if (!ctx) throw new ConversionError('OffscreenCanvas 2D 不可用');
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      blob = await canvas.convertToBlob({ type: 'image/png' });
+    } else if (typeof document !== 'undefined') {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d', { alpha: true });
+      if (!ctx) throw new ConversionError('Canvas 2D 不可用');
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) =>
+            b
+              ? resolve(b)
+              : reject(new ConversionError('toBlob PNG 失败')),
+          'image/png',
+        );
+      });
+    } else {
+      throw new ConversionError('当前环境缺少 Canvas');
+    }
+  } finally {
+    bitmap.close();
+  }
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer.byteLength);
+  bytes.set(new Uint8Array(buffer));
+  return bytes;
+}
+
+/**
+ * Phase 5: compose a sorted array of static frames into one animated WebP.
+ * Workflow:
+ *   1. Read the first frame's dimensions (bitmap).
+ *   2. For each frame: transcode to same-sized PNG bytes and writeFile to
+ *      MEMFS as img_0001.png, img_0002.png, ...
+ *   3. ffmpeg -framerate F -i img_%04d.png -loop L -pix_fmt yuva420p
+ *             -quality Q out.webp
+ *   4. readFile out.webp, wrap in Blob, clean MEMFS.
+ * Progress is split 0..0.5 preprocess / 0.5..1 ffmpeg.
+ */
+export async function encodeSequenceToWebP(
+  files: readonly File[],
+  opts: VideoEncodeOptions,
+  onProgress: (p: number) => void,
+): Promise<Blob> {
+  if (files.length < 2) {
+    throw new ConversionError('序列合成至少需要 2 帧');
+  }
+  const first = files[0];
+  if (!first) throw new ConversionError('第一帧不可用');
+
+  // 1) Dimensions from the first frame
+  let width = 0;
+  let height = 0;
+  try {
+    const firstBitmap = await createImageBitmap(first);
+    width = firstBitmap.width;
+    height = firstBitmap.height;
+    firstBitmap.close();
+  } catch (cause) {
+    throw new ConversionError('无法读取第一帧尺寸', cause);
+  }
+  if (width === 0 || height === 0) {
+    throw new ConversionError('第一帧尺寸无效');
+  }
+
+  const ff = await loadFfmpeg();
+  const { fetchFile: _fetchFile } = await import('@ffmpeg/util');
+  void _fetchFile; // keep the import side-effect consistent with video path
+
+  const writtenNames: string[] = [];
+
+  const onFfProgress = (data: { progress: number }) => {
+    const p = Number(data.progress);
+    if (Number.isFinite(p)) {
+      onProgress(0.5 + Math.min(1, Math.max(0, p)) * 0.5);
+    }
+  };
+
+  try {
+    // 2) Preprocess each frame
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file) continue;
+      let pngBytes: Uint8Array;
+      try {
+        pngBytes = await preprocessFrameToPng(file, width, height);
+      } catch (cause) {
+        throw new ConversionError(
+          `第 ${i + 1} 帧（${file.name}）预处理失败`,
+          cause,
+        );
+      }
+      const name = `img_${String(i + 1).padStart(4, '0')}.png`;
+      await ff.writeFile(name, pngBytes);
+      writtenNames.push(name);
+      onProgress(((i + 1) / files.length) * 0.5);
+    }
+
+    // 3) ffmpeg compose
+    ff.on('progress', onFfProgress);
+    try {
+      await ff.exec([
+        '-framerate',
+        String(opts.fps),
+        '-i',
+        'img_%04d.png',
+        '-loop',
+        String(opts.loopCount),
+        '-pix_fmt',
+        'yuva420p',
+        '-quality',
+        String(opts.quality),
+        '-preset',
+        'default',
+        'out.webp',
+      ]);
+    } finally {
+      ff.off('progress', onFfProgress);
+    }
+
+    // 4) Read output
+    const data = await ff.readFile('out.webp');
+    if (typeof data === 'string') {
+      throw new ConversionError('FFmpeg 返回了意外的文本数据');
+    }
+    const bytes = new Uint8Array(data.byteLength);
+    bytes.set(data);
+    return new Blob([bytes], { type: 'image/webp' });
+  } catch (cause) {
+    if (cause instanceof ConversionError) throw cause;
+    throw new ConversionError('序列合成失败', cause);
+  } finally {
+    for (const name of writtenNames) {
+      try {
+        await ff.deleteFile(name);
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      await ff.deleteFile('out.webp');
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
  * Encode a video File into animated WebP via ffmpeg.wasm.
  * Deletes its MEMFS inputs/outputs on completion to keep memory bounded
  * across successive calls.

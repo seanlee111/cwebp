@@ -8,10 +8,12 @@ import {
   type VideoFps,
   type VideoLoopCount,
 } from './components/QualityControl';
+import { SequenceActions } from './components/SequenceActions';
 import {
   ConversionError,
   captureVideoThumbnail,
   encode,
+  encodeSequence,
   encodeVideo,
   getWasmState,
   loadWasm,
@@ -56,15 +58,20 @@ export function App() {
   // Live ffmpeg state — only subscribed once there's a video task
   const [videoState, setVideoState] = useState<FfmpegLoadState>('idle');
 
-  // Derived: does the current queue contain any video item?
-  const hasVideoTask = useMemo(
-    () => state.order.some((id) => state.items[id]?.kind === 'video'),
+  // Derived: does the current queue need ffmpeg at all? Video and sequence
+  // tasks both go through the ffmpeg.wasm worker; image tasks do not.
+  const needsFfmpeg = useMemo(
+    () =>
+      state.order.some((id) => {
+        const k = state.items[id]?.kind;
+        return k === 'video' || k === 'sequence';
+      }),
     [state.items, state.order],
   );
 
-  // Subscribe to ffmpeg state when a video enters the queue
+  // Subscribe to ffmpeg state as soon as any video or sequence task is queued
   useEffect(() => {
-    if (!hasVideoTask) return;
+    if (!needsFfmpeg) return;
     let cleanup: (() => void) | null = null;
     let cancelled = false;
     void subscribeVideoState(setVideoState).then((u) => {
@@ -75,15 +82,15 @@ export function App() {
       cancelled = true;
       cleanup?.();
     };
-  }, [hasVideoTask]);
+  }, [needsFfmpeg]);
 
-  // Pre-warm ffmpeg the moment a video is queued, so probe + encode don't wait
+  // Pre-warm ffmpeg on first ffmpeg-needing task so probe/encode don't wait
   useEffect(() => {
-    if (!hasVideoTask) return;
+    if (!needsFfmpeg) return;
     void preloadVideoEncoder().catch(() => {
       // UI will reflect 'failed' state via the subscription above
     });
-  }, [hasVideoTask]);
+  }, [needsFfmpeg]);
 
   // Idle prefetch of WASM encoder for the image side
   useEffect(() => {
@@ -198,6 +205,37 @@ export function App() {
       return;
     }
 
+    if (item.kind === 'sequence') {
+      // Sequence composition pipeline
+      inFlight.current.add(nextId);
+      dispatch({ type: 'START_CONVERT', id: nextId });
+      void (async () => {
+        try {
+          const frames = item.sequenceFrames ?? [];
+          if (frames.length < 2) {
+            throw new ConversionError('序列合成至少需要 2 帧');
+          }
+          const blob = await encodeSequence(
+            frames,
+            {
+              fps: optsRef.current.fps,
+              quality: optsRef.current.quality,
+              loopCount: optsRef.current.loopCount,
+            },
+            (p) => dispatch({ type: 'PROGRESS', id: nextId, progress: p }),
+          );
+          dispatch({ type: 'DONE', id: nextId, blob });
+        } catch (e) {
+          const msg =
+            e instanceof ConversionError ? e.message : '序列合成失败（未知错误）';
+          dispatch({ type: 'FAIL', id: nextId, error: msg });
+        } finally {
+          inFlight.current.delete(nextId);
+        }
+      })();
+      return;
+    }
+
     // Video pipeline
     inFlight.current.add(nextId);
     dispatch({ type: 'START_CONVERT', id: nextId });
@@ -232,6 +270,13 @@ export function App() {
       }
     })();
   }, [state.items, state.order, dispatch, wasmState]);
+
+  const handleComposeSequence = useCallback(
+    (files: File[]) => {
+      dispatch({ type: 'ADD_SEQUENCE', files });
+    },
+    [dispatch],
+  );
 
   const items = useMemo<FileItem[]>(() => {
     const out: FileItem[] = [];
@@ -286,18 +331,18 @@ export function App() {
       </header>
 
       <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10">
-        {hasVideoTask && videoState === 'loading' && (
+        {needsFfmpeg && videoState === 'loading' && (
           <div className="flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
             <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" aria-hidden="true" />
             <span>
-              正在加载视频编码器（约 10 MB，第一次较慢，加载后浏览器会缓存）…
+              正在加载视频 / 合成编码器（约 10 MB，第一次较慢，加载后浏览器会缓存）…
             </span>
           </div>
         )}
-        {hasVideoTask && videoState === 'failed' && (
+        {needsFfmpeg && videoState === 'failed' && (
           <div className="flex items-center gap-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
             <AlertCircle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-            <span className="flex-1">视频编码器加载失败。</span>
+            <span className="flex-1">编码器加载失败。</span>
             <button
               type="button"
               onClick={onRetryFfmpeg}
@@ -324,14 +369,17 @@ export function App() {
           onQualityChange={setQuality}
           onModeChange={setMode}
           onRetryWasm={onRetryWasm}
-          hasVideo={hasVideoTask}
+          hasVideo={needsFfmpeg}
           fps={fps}
           loopCount={loopCount}
           onFpsChange={setFps}
           onLoopCountChange={setLoopCount}
         />
         <FileQueue state={state} dispatch={dispatch} imageMode={mode} />
-        <BulkActions items={items} />
+        <div className="flex flex-wrap justify-end gap-3">
+          <SequenceActions items={items} onCompose={handleComposeSequence} />
+          <BulkActions items={items} />
+        </div>
       </main>
     </div>
   );
