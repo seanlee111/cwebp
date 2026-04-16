@@ -63,10 +63,14 @@
 
 ---
 
-## 待决策
+## 已决策（2026-04-16）
 
-开工前确认：
+| 问题 | 裁决 | 对实现的影响 |
+|---|---|---|
+| 首屏体积 | 严守 ≤ 100 KB gzip；超限即放弃 Phase 2 | T-44 build 验证是 hard gate；首屏超预算时停工汇报 |
+| `converter.ts` | 直接删除 | T-41 整体替换，不做 re-export 兼容层 |
+| 默认模式 | WASM 真无损默认选中 + idle prefetch | 在 Phase 5.3 加 T-45a：`requestIdleCallback` 后台 prefetch WASM |
 
-1. 是否允许 Phase 2 首屏超 100 KB（如果 wasm chunk splitting 不如预期）？
-2. 是否要在 Phase 2 就把 `converter.ts` 整个删掉，还是保留兼容 re-export 一个版本？
-3. 无损模式默认选中 or 默认高速？（倾向默认高速，因为 80% 用户的场景是 lossy）
+### 追加任务
+
+- [ ] **T-45a** 在 App mount 后 `requestIdleCallback`（或 `setTimeout(0)` 降级）触发 `loadWasm()` 后台 prefetch，使默认选中 WASM 时用户首次拖图大概率已 ready。UI 期间继续可用（加载异步，不阻塞主线程）。

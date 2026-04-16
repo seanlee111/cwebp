@@ -26,13 +26,14 @@ MVP 的"近无损"模式实现方式是 `canvas.toBlob('image/webp', quality=1.0
 
 ### US-2.2 懒加载体积守护
 
-> 作为普通用户，我只想压缩几张 JPEG，打开应用首屏加载不应包含 WASM 编码器。只有勾选真无损时才拉取。
+> 作为普通用户，打开应用的 critical rendering path 不应包含 WASM 编码器。默认模式虽然是 WASM，但 WASM 走 idle prefetch，首屏渲染完之后才后台拉取。
 
 **验收**：
-- 默认首屏 JS + CSS gzip 体积 **≤ 100 KB**（不含 WASM chunk）。
-- 勾选 WASM 无损 → 触发动态 import，UI 显示"加载编码器中…"提示。
-- WASM chunk 加载在良好网络下 **< 2s** 完成。
-- 加载过一次后 Service Worker / HTTP 缓存复用，不重复拉取。
+- 默认首屏（critical）JS + CSS gzip 体积 **≤ 100 KB**（不含 WASM chunk）。
+- 页面 `load` 事件后 `requestIdleCallback` 触发 WASM 动态 import；UI 不阻塞。
+- 用户首次拖图时若 WASM 已 ready，立即开始编码；若未 ready，UI 显示"加载编码器中…"提示。
+- WASM chunk 加载在良好网络下 **< 2s** 完成；加载过一次后 HTTP 缓存复用。
+- **Hard gate**：若构建产物 critical 部分 gzip > 100 KB，放弃 Phase 2 并汇报。
 
 ### US-2.3 加载失败的明确降级
 
