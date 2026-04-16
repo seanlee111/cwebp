@@ -37,9 +37,19 @@ export interface EncodeOptions {
 
 export async function encode(file: File, opts: EncodeOptions): Promise<Blob> {
   if (canUseWorker) {
-    return workerEncode(opts.mode, file, opts.quality);
+    try {
+      return await workerEncode(opts.mode, file, opts.quality);
+    } catch (e) {
+      // Worker path broke at runtime — e.g. a browser that feature-detects
+      // OffscreenCanvas.convertToBlob but silently doesn't implement WebP
+      // output there. Fall back to the main-thread path, which uses
+      // HTMLCanvasElement.toBlob and has much broader coverage.
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[encoder] worker encode failed, falling back to main thread', e);
+      }
+    }
   }
-  // Fallback: main-thread direct call
   if (opts.mode === 'wasm') {
     return encodeWasmLossless(file);
   }

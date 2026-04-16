@@ -1,11 +1,14 @@
 /**
  * WASM-based WebP encoder — the "true lossless" path.
  *
- * Phase 4: worker-safe. OffscreenCanvas is now required (not optional);
- * without it the module throws on call. The module-level subscription
- * state is intentionally per-realm, so when this module is imported from
- * the encoder Worker the Worker has its own copy — the main thread
- * mirrors it via postMessage in encoderClient/encoder.worker.
+ * Environment-aware: uses OffscreenCanvas when available (faster, no DOM
+ * overhead — and it's the only option in a Worker), otherwise falls back
+ * to an HTMLCanvasElement on the main thread. Either way we end up with
+ * an ImageData that @jsquash/webp can consume.
+ *
+ * Module-level state (load promise, subscribers) is per-realm: when this
+ * module is imported from encoder.worker.ts the Worker has its own copy
+ * of the state and the main thread mirrors it via postMessage.
  */
 import { ConversionError } from './errors';
 
@@ -63,13 +66,11 @@ export async function loadWasm(): Promise<void> {
 }
 
 const SUPPORTED_MIME = new Set(['image/png', 'image/jpeg']);
+const isMainThread = typeof document !== 'undefined';
 
 export async function encodeWasmLossless(file: File): Promise<Blob> {
   if (!SUPPORTED_MIME.has(file.type)) {
     throw new ConversionError(`不支持的格式: ${file.type || '未知'}`);
-  }
-  if (typeof OffscreenCanvas === 'undefined') {
-    throw new ConversionError('当前环境不支持 OffscreenCanvas');
   }
 
   if (loadState !== 'ready') {
@@ -79,11 +80,9 @@ export async function encodeWasmLossless(file: File): Promise<Blob> {
       throw new ConversionError('WASM 编码器加载失败', cause);
     }
   }
-
   if (!modulePromise) {
     throw new ConversionError('WASM 编码器未就绪');
   }
-
   const mod = await modulePromise;
 
   let bitmap: ImageBitmap;
@@ -93,14 +92,7 @@ export async function encodeWasmLossless(file: File): Promise<Blob> {
     throw new ConversionError('图片解码失败（文件可能已损坏）', cause);
   }
 
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const ctx = canvas.getContext('2d', { alpha: true });
-  if (!ctx) {
-    bitmap.close();
-    throw new ConversionError('OffscreenCanvas 2D 上下文不可用');
-  }
-  ctx.drawImage(bitmap, 0, 0);
-  const imageData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+  const imageData = extractImageData(bitmap);
   bitmap.close();
 
   try {
@@ -109,4 +101,27 @@ export async function encodeWasmLossless(file: File): Promise<Blob> {
   } catch (cause) {
     throw new ConversionError('WASM 编码失败', cause);
   }
+}
+
+function extractImageData(bitmap: ImageBitmap): ImageData {
+  // Prefer OffscreenCanvas (works in both threads, less DOM overhead)
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const offscreen = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = offscreen.getContext('2d', { alpha: true });
+    if (ctx) {
+      ctx.drawImage(bitmap, 0, 0);
+      return ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+    }
+  }
+  // Main-thread fallback for browsers without OffscreenCanvas
+  if (isMainThread) {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext('2d', { alpha: true });
+    if (!ctx) throw new ConversionError('Canvas 2D 上下文不可用');
+    ctx.drawImage(bitmap, 0, 0);
+    return ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+  }
+  throw new ConversionError('当前环境缺少 OffscreenCanvas');
 }
