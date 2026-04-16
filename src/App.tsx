@@ -26,9 +26,10 @@ import {
 } from './core/encoder';
 import { useQueue, type FileItem } from './core/queue';
 import { useLocalStorage } from './hooks/useLocalStorage';
+import { isLargeItem } from './utils/estimate';
 
 const RECODE_DEBOUNCE_MS = 300;
-const MAX_VIDEO_DURATION_SEC = 10;
+const MAX_VIDEO_DURATION_SEC = 30;
 
 export function App() {
   // Startup feature-detect
@@ -241,6 +242,11 @@ export function App() {
     return out;
   }, [state.items, state.order]);
 
+  const hasLargeItem = useMemo(
+    () => items.some((it) => isLargeItem(it) && it.status !== 'done' && it.status !== 'failed'),
+    [items],
+  );
+
   const onRetryWasm = useCallback(() => {
     void loadWasm().catch(() => {});
   }, []);
@@ -274,7 +280,7 @@ export function App() {
             cwebp · 本地图片/视频转 WebP
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            本地处理，文件不上传 · PNG / JPEG · 10s 内视频 → animated WebP
+            本地处理，文件不上传 · PNG / JPEG · 30s 内视频 → animated WebP
           </p>
         </div>
       </header>
@@ -301,6 +307,14 @@ export function App() {
             </button>
           </div>
         )}
+        {hasLargeItem && (
+          <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            <span>
+              队列里有大文件（图 &gt; 50 MB 或视频 &gt; 100 MB / 20 s）。编码可能需要较长时间，请保持页面打开。具体预估可将鼠标悬停到文件名旁的 ⚠ 图标。
+            </span>
+          </div>
+        )}
 
         <DropZone onFiles={handleFiles} />
         <QualityControl
@@ -316,7 +330,7 @@ export function App() {
           onFpsChange={setFps}
           onLoopCountChange={setLoopCount}
         />
-        <FileQueue state={state} dispatch={dispatch} />
+        <FileQueue state={state} dispatch={dispatch} imageMode={mode} />
         <BulkActions items={items} />
       </main>
     </div>

@@ -45,7 +45,18 @@ export type QueueAction =
   | { type: 'CLEAR_ALL' }
   | { type: 'RECODE_ALL' };
 
-const MAX_SIZE_BYTES = 50 * 1024 * 1024;
+// Phase 4: size caps split by kind (MVP/Phase 3 shared a single 50 MB cap).
+const MAX_IMAGE_SIZE_BYTES = 200 * 1024 * 1024;
+const MAX_VIDEO_SIZE_BYTES = 500 * 1024 * 1024;
+
+function sizeCapFor(kind: FileKind): number {
+  return kind === 'video' ? MAX_VIDEO_SIZE_BYTES : MAX_IMAGE_SIZE_BYTES;
+}
+
+function sizeCapLabel(kind: FileKind): string {
+  const mb = Math.round(sizeCapFor(kind) / 1024 / 1024);
+  return kind === 'video' ? `视频超过 ${mb} MB 上限` : `图片超过 ${mb} MB 上限`;
+}
 
 const initialState: QueueState = { items: {}, order: [] };
 
@@ -91,9 +102,13 @@ const reducer: Reducer<QueueState, QueueAction> = (state, action) => {
       const items: Record<string, FileItem> = { ...state.items };
       const order = [...state.order];
       for (const file of action.files) {
+        const kind = detectKind(file);
         const next =
-          file.size > MAX_SIZE_BYTES
-            ? buildFailedItem(file, `文件超过 50 MB 上限（${Math.round(file.size / 1024 / 1024)} MB）`)
+          file.size > sizeCapFor(kind)
+            ? buildFailedItem(
+                file,
+                `${sizeCapLabel(kind)}（当前 ${Math.round(file.size / 1024 / 1024)} MB）`,
+              )
             : buildPendingItem(file);
         items[next.id] = next;
         order.push(next.id);
@@ -207,7 +222,7 @@ const reducer: Reducer<QueueState, QueueAction> = (state, action) => {
       for (const id of state.order) {
         const old = state.items[id];
         if (!old) continue;
-        if (old.status === 'failed' && old.originalSize > MAX_SIZE_BYTES) {
+        if (old.status === 'failed' && old.originalSize > sizeCapFor(old.kind)) {
           items[id] = old;
           continue;
         }

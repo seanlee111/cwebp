@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   Download,
   Film,
@@ -7,18 +8,25 @@ import {
   X,
 } from 'lucide-react';
 import type { FileItem } from '../core/queue';
+import type { EncoderMode } from '../core/encoder';
 import {
   formatDuration,
   formatFileSize,
   formatSavings,
 } from '../utils/fileSize';
+import {
+  estimateEncodeSeconds,
+  formatEstimate,
+  isLargeItem,
+} from '../utils/estimate';
 
 interface FileRowProps {
   readonly item: FileItem;
   readonly onRemove: () => void;
+  readonly imageMode: EncoderMode;
 }
 
-export function FileRow({ item, onRemove }: FileRowProps) {
+export function FileRow({ item, onRemove, imageMode }: FileRowProps) {
   const {
     file,
     kind,
@@ -75,6 +83,15 @@ export function FileRow({ item, onRemove }: FileRowProps) {
           {kind === 'video' && videoMeta && (
             <span className="flex-shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-slate-600">
               {formatDuration(videoMeta.duration)}
+            </span>
+          )}
+          {isLargeItem(item) && status !== 'done' && status !== 'failed' && (
+            <span
+              className="flex-shrink-0 text-amber-500"
+              title={`文件较大（${formatFileSize(item.originalSize)}），预计${formatEstimate(estimateEncodeSeconds(item, imageMode))}`}
+              aria-label="大文件警告"
+            >
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
             </span>
           )}
         </div>

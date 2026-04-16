@@ -1,13 +1,15 @@
 import type { Dispatch } from 'react';
 import type { QueueAction, QueueState } from '../core/queue';
+import type { EncoderMode } from '../core/encoder';
 import { FileRow } from './FileRow';
 
 interface FileQueueProps {
   readonly state: QueueState;
   readonly dispatch: Dispatch<QueueAction>;
+  readonly imageMode: EncoderMode;
 }
 
-export function FileQueue({ state, dispatch }: FileQueueProps) {
+export function FileQueue({ state, dispatch, imageMode }: FileQueueProps) {
   if (state.order.length === 0) return null;
 
   return (
@@ -32,6 +34,7 @@ export function FileQueue({ state, dispatch }: FileQueueProps) {
             <FileRow
               key={id}
               item={item}
+              imageMode={imageMode}
               onRemove={() => dispatch({ type: 'REMOVE', id })}
             />
           );

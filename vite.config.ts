@@ -14,4 +14,9 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 5173,
   },
+  // Phase 4: ES module workers so the encoder Worker can dynamic-import
+  // @jsquash/webp (code splitting is not allowed in IIFE workers).
+  worker: {
+    format: 'es',
+  },
 }));

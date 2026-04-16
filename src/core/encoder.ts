@@ -1,17 +1,31 @@
 /**
- * Unified encoder entry point — strategy dispatcher between the backends.
+ * Unified encoder entry point — public API.
  *
- * Static paths (always in main bundle):
- * - Canvas encoder (lossy, fast)
- * - WASM encoder wrapper (jsquash, true lossless — WASM itself lazy)
+ * Phase 4: Image path (canvas + wasm lossless) now goes through a Web Worker
+ * by default via `encoderClient`. When the browser lacks Worker or
+ * OffscreenCanvas (very old Safari), `canUseWorker` is false and we fall
+ * back to calling the main-thread encoders directly. API shape is unchanged.
  *
- * Lazy paths (only when needed):
- * - Video encoder (ffmpeg.wasm, huge ~10 MB WASM chunk) — loaded via
- *   dynamic import on first video task so image-only sessions never
- *   pay the cost.
+ * Video path is still its own lazy-loaded module (ffmpeg.wasm + own worker).
  */
-import { encodeCanvas } from './canvasEncoder';
-import { encodeWasmLossless } from './wasmEncoder';
+import {
+  encodeCanvas,
+  supportsWebPEncoding as canvasFeatureDetect,
+} from './canvasEncoder';
+import {
+  encodeWasmLossless,
+  getWasmState as getWasmStateMain,
+  loadWasm as loadWasmMain,
+  subscribeWasmState as subscribeWasmStateMain,
+  type WasmLoadState,
+} from './wasmEncoder';
+import {
+  canUseWorker,
+  subscribeWorkerWasmState,
+  workerEncode,
+  workerPreloadWasm,
+  workerWasmState,
+} from './encoderClient';
 
 export type EncoderMode = 'canvas' | 'wasm';
 
@@ -22,27 +36,49 @@ export interface EncodeOptions {
 }
 
 export async function encode(file: File, opts: EncodeOptions): Promise<Blob> {
+  if (canUseWorker) {
+    return workerEncode(opts.mode, file, opts.quality);
+  }
+  // Fallback: main-thread direct call
   if (opts.mode === 'wasm') {
     return encodeWasmLossless(file);
   }
   return encodeCanvas(file, { quality: opts.quality });
 }
 
-// Image-side re-exports (synchronous)
-export {
-  isSupportedInput,
-  supportsWebPEncoding,
-} from './canvasEncoder';
-export {
-  getWasmError,
-  getWasmState,
-  loadWasm,
-  subscribeWasmState,
-} from './wasmEncoder';
-export type { WasmLoadState } from './wasmEncoder';
+/** Synchronous WASM state getter (switches source based on runtime) */
+export function getWasmState(): WasmLoadState {
+  return canUseWorker ? workerWasmState() : getWasmStateMain();
+}
+
+/** Subscribe to WASM load state transitions. */
+export function subscribeWasmState(fn: (s: WasmLoadState) => void): () => void {
+  return canUseWorker ? subscribeWorkerWasmState(fn) : subscribeWasmStateMain(fn);
+}
+
+/**
+ * Ask the active encoder (worker or main) to preload the WASM module.
+ * In worker mode this fires a message and returns immediately; the
+ * actual load completion is observable via `subscribeWasmState`.
+ */
+export async function loadWasm(): Promise<void> {
+  if (canUseWorker) {
+    workerPreloadWasm();
+    return;
+  }
+  return loadWasmMain();
+}
+
+// Synchronous re-exports
+export { isSupportedInput } from './canvasEncoder';
 export { ConversionError } from './errors';
 
-// ── Video side — lazy-loaded on demand ─────────────────────────────────────
+/** 1×1 probe to verify the browser can emit WebP at all. */
+export async function supportsWebPEncoding(): Promise<boolean> {
+  return canvasFeatureDetect();
+}
+
+// ── Video side — lazy, unchanged ───────────────────────────────────────────
 
 import type {
   FfmpegLoadState,
@@ -52,7 +88,6 @@ import type {
 
 let videoModulePromise: Promise<typeof import('./videoEncoder')> | null = null;
 
-/** Kick off the dynamic import of videoEncoder (and transitively @ffmpeg/*). */
 function loadVideoModule(): Promise<typeof import('./videoEncoder')> {
   if (!videoModulePromise) {
     videoModulePromise = import('./videoEncoder');
@@ -79,19 +114,11 @@ export async function captureVideoThumbnail(file: File): Promise<string> {
   return mod.captureFirstFrame(file);
 }
 
-/**
- * Fire-and-forget pre-warm so the ~10 MB ffmpeg core fetch starts as soon
- * as the first video task hits the queue, not when the processor gets to it.
- */
 export async function preloadVideoEncoder(): Promise<void> {
   const mod = await loadVideoModule();
   await mod.loadFfmpeg();
 }
 
-/**
- * Subscribe to ffmpeg load-state transitions. Returns an unsubscribe fn;
- * the Promise resolves once the videoEncoder module itself has been loaded.
- */
 export async function subscribeVideoState(
   fn: (state: FfmpegLoadState) => void,
 ): Promise<() => void> {
@@ -100,3 +127,4 @@ export async function subscribeVideoState(
 }
 
 export type { FfmpegLoadState, VideoEncodeOptions, VideoMetadata };
+export type { WasmLoadState } from './wasmEncoder';

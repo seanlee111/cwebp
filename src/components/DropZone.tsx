@@ -69,7 +69,7 @@ export function DropZone({ onFiles }: DropZoneProps) {
         拖放图片或视频到这里，或点击选择文件
       </p>
       <p className="mt-1 text-xs text-slate-400">
-        支持 PNG / JPEG · 10 秒内短视频（MP4 / WebM / MOV）· 本地处理，不上传
+        PNG / JPEG（≤ 200 MB） · 30 秒内短视频 MP4 / WebM / MOV（≤ 500 MB） · 本地处理，不上传
       </p>
       <input
         ref={inputRef}
