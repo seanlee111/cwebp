@@ -80,9 +80,22 @@ cwebp/
 | 1. Specify (WHAT) | [specs/001-mvp/spec.md](specs/001-mvp/spec.md) | ✅ 已写 |
 | 2. Plan (HOW) | [specs/001-mvp/plan.md](specs/001-mvp/plan.md) | ✅ 已写 |
 | 3. Tasks | [specs/001-mvp/tasks.md](specs/001-mvp/tasks.md) | ✅ 已写 |
-| 4. Implement | `src/` 下的真实代码 | ⏳ 待用户确认方向后启动 |
+| 4. Implement | `src/` 下的真实代码 | ✅ MVP 完成 |
 
-**工作节奏**：每推进一个阶段产出后，等用户确认或提修改再进下一阶段，避免早期方向走偏后返工。
+### 实现 commit 轨迹
+
+| Commit | Phase | 内容 |
+|---|---|---|
+| `57a6ab1` | — | initial specs 基线（constitution / spec / plan / tasks） |
+| `b1eb479` | 4.0 | 脚手架：Vite 6 + React 18 + TS strict + Tailwind 4 |
+| `7d2deac` | 4.1 | 转换核心：converter / queue 状态类型 / fileSize / id |
+| `911fe17` | 4.2 | US-1 最小 UI：DropZone / FileRow / FileQueue 串联 |
+| `005d0e6` | 4.3 | US-2 + US-3：批量、质量滑块、debounce 重编码、ZIP 打包 |
+| `9a06e5c` | 4.4 | US-5 收尾：启动 feature-detect fallback（另 US-5 渲染 / 50MB 上限已在 4.2/4.3 落地） |
+| `8aec231` | 4.5 | 响应式微调：窄屏下 FileRow 下载按钮 icon-only、错误 truncate |
+| Phase 4.6 | — | build 验证 + README + CLAUDE.md 同步（本 commit） |
+
+**工作节奏**：每个 Phase 独立 commit；build 产物（`dist/`）在 `.gitignore` 里。
 
 ## MVP 成功判定（验收标准）
 
@@ -95,14 +108,30 @@ cwebp/
 5. 全程 **没有任何网络请求**离开浏览器（DevTools Network 面板可验证）。
 6. 主流浏览器（Chrome / Edge / Safari / Firefox 最新版）均能正常工作。
 
+## 当前状态
+
+**MVP 代码完成，待用户在浏览器中跑完 6 条验收**（见"MVP 成功判定"章节）。
+
+静态层面已确认：
+- TypeScript strict 全通过（`npm run typecheck`）
+- `npm run build` 成功，产物 82 KB gzip
+- `src/` 下无任何 `fetch` / `XMLHttpRequest` / `WebSocket` / 外部 URL 引用（grep 自证 Constitution P1）
+- `dist/` 用相对路径资源，可直接 `file://` 打开
+
+运行时验收（6 条）需要用户真实拖一批图进 UI 并观察：
+1. 10 张混合 PNG/JPEG 全部转换成功 ← **需浏览器测试**
+2. 质量滑块 300ms 后所有文件重编码并刷新体积 ← **需浏览器测试**
+3. 1920×1080 JPEG 质量 80 输出 < 原图 85%（体积依赖原图内容）← **需浏览器测试**
+4. 透明 PNG 透明通道保留（Canvas 已开 `alpha: true`）← **需浏览器测试**
+5. DevTools Network 面板无出站请求 ← **代码层已静态证明**；运行时双重确认
+6. Chrome / Edge / Safari / Firefox 均工作（依赖浏览器 toBlob WebP ≥ 97% 覆盖率）← **需跨浏览器测试**
+
 ## 下一步
 
-当前阶段：**等待用户对 spec 方向的确认**。确认后即可进入 `Phase 4 Implement`：
-
-1. `npm create vite@latest cwebp -- --template react-ts`
-2. 装 Tailwind、写骨架组件
-3. 按 [tasks.md](specs/001-mvp/tasks.md) 的顺序推进
+- **用户**：浏览器里跑一遍 6 条验收，有问题反馈
+- **如需部署**：`npm run build` 后把 `dist/` 上传到任意静态托管
+- **如要进 Phase 2+**：独立新 spec（`specs/002-xxx`），参见 [plan.md §9](specs/001-mvp/plan.md) 的 Roadmap
 
 ---
 
-_最后更新：2026-04-16_
+_最后更新：2026-04-16（MVP 完成）_
