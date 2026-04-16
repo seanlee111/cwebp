@@ -78,7 +78,8 @@ cwebp/
 |---|---|---|
 | **001-mvp** | [constitution](specs/001-mvp/constitution.md) · [spec](specs/001-mvp/spec.md) · [plan](specs/001-mvp/plan.md) · [tasks](specs/001-mvp/tasks.md) | ✅ 交付 + 浏览器验收通过 |
 | **002-lossless-wasm** | [spec](specs/002-lossless-wasm/spec.md) · [plan](specs/002-lossless-wasm/plan.md) · [tasks](specs/002-lossless-wasm/tasks.md) | ✅ 实现完成（首屏 hard gate 通过） |
-| 003+ | Web Worker pool / Tauri 桌面版 / AVIF | ⏳ 未规划 |
+| **003-animated-video** | [spec](specs/003-animated-video/spec.md) · [plan](specs/003-animated-video/plan.md) · [tasks](specs/003-animated-video/tasks.md) | 📝 spec 已写，实现中（ffmpeg.wasm 方案） |
+| 004+ | Web Worker pool / Tauri 桌面版 / AVIF / trim 等视频 UX 增强 | ⏳ 未规划 |
 
 ### MVP 实现 commit 轨迹（001）
 
@@ -118,7 +119,9 @@ cwebp/
 
 ## 当前状态
 
-**MVP（001）+ Phase 2（002）实现已完成并通过首屏硬预算**。等用户在浏览器中验收 Phase 2 的三条 US（US-2.1 像素级保真、US-2.2 懒加载、US-2.3 失败降级）。
+**MVP（001）+ Phase 2（002）实现已完成并通过首屏硬预算**。Phase 3（视频 → animated WebP）spec 已写完，选型 **ffmpeg.wasm 单线程版**（用户拍板），实现进行中。
+
+Phase 2 的三条 US（像素级保真 / 懒加载 / 失败降级）用户将与 Phase 3 一起在浏览器验收。
 
 ## 部署
 
