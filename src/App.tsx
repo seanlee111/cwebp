@@ -213,6 +213,7 @@ export function App() {
       inFlight.current.add(nextId);
       dispatch({ type: 'START_CONVERT', id: nextId });
       const chromaKey = item.sequenceChromaKey === true;
+      const chromaTolerance = item.sequenceChromaTolerance ?? 10;
       void (async () => {
         try {
           const frames = item.sequenceFrames ?? [];
@@ -226,6 +227,7 @@ export function App() {
               quality: optsRef.current.quality,
               loopCount: optsRef.current.loopCount,
               chromaKey,
+              chromaTolerance,
             },
             (p) => dispatch({ type: 'PROGRESS', id: nextId, progress: p }),
           );
@@ -278,7 +280,12 @@ export function App() {
 
   const handleComposeSequence = useCallback(
     (files: File[], opts: SequenceComposeOptions) => {
-      dispatch({ type: 'ADD_SEQUENCE', files, chromaKey: opts.chromaKey });
+      dispatch({
+        type: 'ADD_SEQUENCE',
+        files,
+        chromaKey: opts.chromaKey,
+        chromaTolerance: opts.chromaTolerance,
+      });
     },
     [dispatch],
   );

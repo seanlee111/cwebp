@@ -33,6 +33,8 @@ export interface FileItem {
   readonly sequenceFrameCount?: number;
   /** Phase 6: if true, chroma-key the first frame's (0,0) pixel during composition. */
   readonly sequenceChromaKey?: boolean;
+  /** Phase 7: per-channel tolerance for chroma-key (0–50). */
+  readonly sequenceChromaTolerance?: number;
 }
 
 export interface QueueState {
@@ -42,7 +44,7 @@ export interface QueueState {
 
 export type QueueAction =
   | { type: 'ADD_FILES'; files: readonly File[] }
-  | { type: 'ADD_SEQUENCE'; files: readonly File[]; chromaKey: boolean }
+  | { type: 'ADD_SEQUENCE'; files: readonly File[]; chromaKey: boolean; chromaTolerance: number }
   | { type: 'START_CONVERT'; id: string }
   | { type: 'PROGRESS'; id: string; progress: number }
   | { type: 'SET_VIDEO_META'; id: string; meta: VideoMeta }
@@ -143,6 +145,7 @@ const reducer: Reducer<QueueState, QueueAction> = (state, action) => {
         sequenceFrames: sorted,
         sequenceFrameCount: sorted.length,
         sequenceChromaKey: action.chromaKey,
+        sequenceChromaTolerance: action.chromaTolerance,
       };
       return {
         ...state,

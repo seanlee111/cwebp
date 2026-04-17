@@ -21,10 +21,12 @@ export interface VideoEncodeOptions {
   loopCount: number;
 }
 
-/** Phase 6: sequence composition can chroma-key the first frame's (0,0) pixel. */
+/** Phase 6+7: sequence composition can chroma-key the first frame's (0,0) pixel. */
 export interface SequenceEncodeOptions extends VideoEncodeOptions {
   /** If true, pixels matching the first-frame (0,0) RGB within tolerance become alpha=0. */
   chromaKey?: boolean;
+  /** Phase 7: per-channel tolerance 0–50 (default 10). */
+  chromaTolerance?: number;
 }
 
 interface RGB {
@@ -33,8 +35,7 @@ interface RGB {
   readonly b: number;
 }
 
-/** ±10 per channel (Chebyshev) tolerates minor JPEG compression artifacts. */
-const CHROMA_TOLERANCE = 10;
+const DEFAULT_CHROMA_TOLERANCE = 10;
 
 export interface VideoMetadata {
   duration: number;
@@ -187,21 +188,34 @@ export async function captureFirstFrame(file: File): Promise<string> {
   });
 }
 
-/** Phase 6: per-pixel chroma-key. Uses Chebyshev max-channel distance. */
+/**
+ * Phase 7: per-pixel chroma-key with soft edge.
+ * Chebyshev max-channel distance:
+ *   dist ≤ innerTol  → alpha=0 (fully transparent)
+ *   innerTol < dist ≤ tol → alpha ramps linearly 0→255 (soft edge)
+ *   dist > tol → alpha unchanged
+ * innerTol = tol × 0.7 — gives a ~30% soft transition band.
+ */
 function applyChromaKey(data: Uint8ClampedArray, key: RGB, tol: number): void {
   const { r, g, b } = key;
+  const inner = tol * 0.7;
+  const band = tol - inner; // > 0 when tol > 0
   for (let i = 0; i < data.length; i += 4) {
     const r0 = data[i];
     const g0 = data[i + 1];
     const b0 = data[i + 2];
     if (r0 === undefined || g0 === undefined || b0 === undefined) continue;
-    if (
-      Math.abs(r0 - r) <= tol &&
-      Math.abs(g0 - g) <= tol &&
-      Math.abs(b0 - b) <= tol
-    ) {
+    const dist = Math.max(
+      Math.abs(r0 - r),
+      Math.abs(g0 - g),
+      Math.abs(b0 - b),
+    );
+    if (dist <= inner) {
       data[i + 3] = 0;
+    } else if (dist <= tol && band > 0) {
+      data[i + 3] = Math.round(255 * ((dist - inner) / band));
     }
+    // dist > tol → leave alpha unchanged
   }
 }
 
@@ -209,7 +223,7 @@ function applyChromaKey(data: Uint8ClampedArray, key: RGB, tol: number): void {
  * Phase 6: read a single RGB pixel at (0,0) of a File via OffscreenCanvas
  * (DOM canvas fallback). Used as the chroma-key color for sequence composition.
  */
-async function extractKeyColor(file: File): Promise<RGB> {
+export async function extractKeyColor(file: File): Promise<RGB> {
   const bitmap = await createImageBitmap(file);
   try {
     const w = bitmap.width;
@@ -255,7 +269,7 @@ async function preprocessFrameToPng(
   file: File,
   width: number,
   height: number,
-  chromaKey: RGB | null,
+  chromaKey: { color: RGB; tolerance: number } | null,
 ): Promise<Uint8Array> {
   const bitmap = await createImageBitmap(file);
   const useOffscreen = typeof OffscreenCanvas !== 'undefined';
@@ -270,7 +284,7 @@ async function preprocessFrameToPng(
       ctx.drawImage(bitmap, 0, 0, width, height);
       if (chromaKey) {
         const img = ctx.getImageData(0, 0, width, height);
-        applyChromaKey(img.data, chromaKey, CHROMA_TOLERANCE);
+        applyChromaKey(img.data, chromaKey.color, chromaKey.tolerance);
         ctx.putImageData(img, 0, 0);
       }
       blob = await canvas.convertToBlob({ type: 'image/png' });
@@ -284,7 +298,7 @@ async function preprocessFrameToPng(
       ctx.drawImage(bitmap, 0, 0, width, height);
       if (chromaKey) {
         const img = ctx.getImageData(0, 0, width, height);
-        applyChromaKey(img.data, chromaKey, CHROMA_TOLERANCE);
+        applyChromaKey(img.data, chromaKey.color, chromaKey.tolerance);
         ctx.putImageData(img, 0, 0);
       }
       blob = await new Promise<Blob>((resolve, reject) => {
@@ -345,11 +359,13 @@ export async function encodeSequenceToWebP(
     throw new ConversionError('第一帧尺寸无效');
   }
 
-  // Phase 6: probe the chroma-key color from the first frame if enabled.
-  let keyColor: RGB | null = null;
+  // Phase 6+7: probe the chroma-key color from the first frame if enabled.
+  let chromaKeyParam: { color: RGB; tolerance: number } | null = null;
   if (opts.chromaKey === true) {
     try {
-      keyColor = await extractKeyColor(first);
+      const color = await extractKeyColor(first);
+      const tolerance = opts.chromaTolerance ?? DEFAULT_CHROMA_TOLERANCE;
+      chromaKeyParam = { color, tolerance };
     } catch (cause) {
       throw new ConversionError('无法读取第一帧左上角颜色用于抠色', cause);
     }
@@ -375,7 +391,7 @@ export async function encodeSequenceToWebP(
       if (!file) continue;
       let pngBytes: Uint8Array;
       try {
-        pngBytes = await preprocessFrameToPng(file, width, height, keyColor);
+        pngBytes = await preprocessFrameToPng(file, width, height, chromaKeyParam);
       } catch (cause) {
         throw new ConversionError(
           `第 ${i + 1} 帧（${file.name}）预处理失败`,

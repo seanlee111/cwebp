@@ -97,6 +97,12 @@ import type {
   VideoMetadata,
 } from './videoEncoder';
 
+// Re-export extractKeyColor for SequenceActions color preview
+export async function probeKeyColor(file: File): Promise<{ r: number; g: number; b: number }> {
+  const mod = await loadVideoModule();
+  return mod.extractKeyColor(file);
+}
+
 let videoModulePromise: Promise<typeof import('./videoEncoder')> | null = null;
 
 function loadVideoModule(): Promise<typeof import('./videoEncoder')> {
